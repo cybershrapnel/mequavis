@@ -919,6 +919,26 @@ function appendFormattedMessage(sender, text) {
   }
 
   return {
-    send
+    send,
+
+    // expose current session id to other scripts (like slash commands)
+    getCurrentSessionId: function () {
+      return currentSessionId;
+    },
+
+    // allow slash-proxy to create/adopt a session and update the left list
+    adoptSessionFromSlash: function (meta) {
+      if (!meta || !meta.session_id) return;
+
+      currentSessionId        = meta.session_id;
+      currentSessionCreatedAt = meta.created_at || currentSessionCreatedAt;
+
+      const ownerFlag = !!meta.owner;
+      const title     = typeof meta.title === "string" ? meta.title : "";
+      const favorite  = !!meta.favorite;
+
+      upsertSession(currentSessionId, currentSessionCreatedAt, ownerFlag, title, favorite);
+      renderSessionList();
+    }
   };
 })();
