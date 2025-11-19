@@ -136,6 +136,7 @@ window.MeqChat = (function () {
     if (s.startsWith("openai ")) return true;
     if (s.startsWith("gemini ")) return true;
     if (s.indexOf("fake api reply") !== -1) return true;
+  if (s === "eve") return true;
     return false;
   }
 
