@@ -62,7 +62,7 @@
   // Ensure label is correct
   tvBtn.textContent = "WATCH AI CABLE TV";
 
-  // 2) Create the TV panel (same geometry as AI MUSIC), but flex column so video fits
+  // 2) Create the TV panel (flex column so video fits)
   const panel = document.createElement("div");
   panel.id = "tvPanel";
   panel.style.cssText = `
@@ -82,7 +82,7 @@
   `;
 
   panel.innerHTML = `
-    <div style="
+    <div id="tvPanelHeader" style="
       display:flex;
       justify-content:space-between;
       align-items:center;
@@ -105,6 +105,15 @@
           padding:2px 8px;
           cursor:pointer;
         ">NEXT VIDEO</button>
+        <button id="tvPanelPopout" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">Popout video</button>
         <button id="tvPanelClose" style="
           background:#111;
           color:#0ff;
@@ -129,8 +138,10 @@
 
   document.body.appendChild(panel);
 
-  const closeBtn = panel.querySelector("#tvPanelClose");
-  const nextBtn  = panel.querySelector("#tvPanelNext");
+  const headerEl    = panel.querySelector("#tvPanelHeader");
+  const closeBtn    = panel.querySelector("#tvPanelClose");
+  const nextBtn     = panel.querySelector("#tvPanelNext");
+  const popoutBtn   = panel.querySelector("#tvPanelPopout");
   const playerContainerId = "tvPlayerContainer";
 
   // 3) YouTube IFrame API loader & player
@@ -234,8 +245,95 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 3.5) POPOUT + DRAG LOGIC
+  // ---------------------------------------------------------------------------
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+  let poppedOut   = false;
+
+  function onMouseDownHeader(e) {
+    if (!poppedOut) return; // only draggable in popout mode
+    e.preventDefault();
+    const rect = panel.getBoundingClientRect();
+    isDragging = true;
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
+
+    // Ensure left/top mode for dragging
+    panel.style.left   = rect.left + "px";
+    panel.style.top    = rect.top + "px";
+    panel.style.right  = "auto";
+    panel.style.bottom = "auto";
+  }
+
+  function onMouseMove(e) {
+    if (!isDragging) return;
+    const newLeft = e.clientX - dragOffsetX;
+    const newTop  = e.clientY - dragOffsetY;
+
+    panel.style.left = newLeft + "px";
+    panel.style.top  = newTop + "px";
+  }
+
+  function onMouseUp() {
+    isDragging = false;
+  }
+
+  if (headerEl) {
+    headerEl.addEventListener("mousedown", onMouseDownHeader);
+  }
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+
+  function popoutPanel() {
+    if (poppedOut) return;
+    poppedOut = true;
+
+    const rect = panel.getBoundingClientRect();
+    const scaleFactor = 0.2;
+
+    const newWidth  = rect.width * scaleFactor;
+    const newHeight = rect.height * scaleFactor;
+
+    panel.style.left   = rect.left + "px";
+    panel.style.top    = rect.top + "px";
+    panel.style.right  = "auto";
+    panel.style.bottom = "auto";
+    panel.style.width  = newWidth + "px";
+    panel.style.height = newHeight+100 + "px";
+
+    // 🔹 Remove the Popout button after use
+    if (popoutBtn) {
+      popoutBtn.style.display = "none";
+      popoutBtn.disabled = true;
+    }
+  }
+
+  if (popoutBtn) {
+    popoutBtn.addEventListener("click", () => {
+      popoutPanel();
+    });
+  }
+
   // 4) Panel controls
   function openPanel() {
+    // Reset geometry each time we open (docked mode)
+    panel.style.left   = "280px";
+    panel.style.right  = "280px";
+    panel.style.top    = "70px";
+    panel.style.bottom = "20px";
+    panel.style.width  = "";
+    panel.style.height = "";
+    poppedOut = false;
+
+    // Restore Popout button on fresh open
+    if (popoutBtn) {
+      popoutBtn.style.display = "inline-block";
+      popoutBtn.disabled = false;
+    }
+
     // use flex so header + player container layout nicely
     panel.style.display = "flex";
 
