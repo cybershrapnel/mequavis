@@ -2,6 +2,7 @@
 // "OPEN TOOLKIT" button -> movable mini phone dialer panel
 // Now: CALL dials the Omniverse digits (0-9) via simulated canvas clicks,
 // with 0.1s between each digit, max 17 digits.
+// ADDED: DTMF-like dial tones on keypad button presses.
 
 (function () {
   // 1) Find the OPEN TOOLKIT button
@@ -132,6 +133,64 @@
   const clearBtn   = panel.querySelector("#dialerClear");
   const callBtn    = panel.querySelector("#dialerCall");
 
+  // ---------------------------------------------------------------------------
+  // 2.5) SIMPLE DTMF-LIKE AUDIO FOR KEYS
+  // ---------------------------------------------------------------------------
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!AudioCtx) return null;
+    if (!audioCtx) {
+      audioCtx = new AudioCtx();
+    }
+    return audioCtx;
+  }
+
+  // DTMF frequency map (low + high tone pairs)
+  const DTMF_FREQS = {
+    "1": [697, 1209],
+    "2": [697, 1336],
+    "3": [697, 1477],
+    "4": [770, 1209],
+    "5": [770, 1336],
+    "6": [770, 1477],
+    "7": [852, 1209],
+    "8": [852, 1336],
+    "9": [852, 1477],
+    "*": [941, 1209],
+    "0": [941, 1336],
+    "#": [941, 1477]
+  };
+
+  function playDialTone(key) {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+
+    const freqs = DTMF_FREQS[key];
+    if (!freqs) return;
+
+    const duration = 0.12; // ~120ms like a quick keypress
+    const now = ctx.currentTime;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0.0, now + duration);
+
+    gain.connect(ctx.destination);
+
+    freqs.forEach((f) => {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(f, now);
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    });
+  }
+
   // 3) Build the keypad (old-school metal dialer style)
   const keys = ["1","2","3","4","5","6","7","8","9","*","0","#"];
 
@@ -166,6 +225,9 @@
       const current = displayEl.textContent || "";
       if (current.length >= 17) return; // hard cap at 17 chars in display as well
       displayEl.textContent = current + key;
+
+      // play dial tone for this key
+      playDialTone(key);
     });
 
     padEl.appendChild(btn);
@@ -190,13 +252,9 @@
     const d = parseInt(digitChar, 10);
     if (isNaN(d)) return;
 
-    // We rely on the existing global canvas + click handler.
     const canvas = document.getElementById("mequavis");
     if (!canvas) return;
 
-    // We also rely on the global `nofurs` array from your main script.
-    // It’s declared with `let nofurs = []` at top-level there,
-    // so we can reference `nofurs` directly (not via window.*).
     let target = null;
     try {
       if (typeof nofurs === "undefined") {
@@ -210,7 +268,6 @@
           (n.flag === "left" || n.flag === "right")
       );
     } catch (e) {
-      // If nofurs isn't in scope yet, bail
       return;
     }
 
@@ -220,8 +277,6 @@
     const scaleX = canvas.width  / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    // Invert the math used by your click handler so that:
-    // mouseX == target.center.x and mouseY == target.center.y
     const clientX = rect.left + target.center.x / scaleX;
     const clientY = rect.top  + target.center.y / scaleY;
 
@@ -239,14 +294,13 @@
   function dialOmniverseSequence(rawNumber) {
     if (!rawNumber) return;
 
-    // Only numeric digits, max 16
+    // Only numeric digits, max 17
     let digits = (rawNumber.match(/[0-9]/g) || []).join("");
     if (!digits) return;
     if (digits.length > 17) {
       digits = digits.slice(0, 17);
     }
 
-    // Dial them at 0.1s intervals
     const intervalMs = 100;
     digits.split("").forEach((ch, idx) => {
       setTimeout(() => {
@@ -261,17 +315,14 @@
       const current = (displayEl.textContent || "").trim();
       if (!current) return;
 
-      // Visual feedback
       const rawDigits = (current.match(/[0-9]/g) || []).join("");
       if (!rawDigits) return;
       const displayDigits = rawDigits.length > 17 ? rawDigits.slice(0,17) : rawDigits;
 
       displayEl.textContent = "DIALING " + displayDigits + "...";
 
-      // Kick off omniverse dialing
       dialOmniverseSequence(rawDigits);
 
-      // Restore display after a short delay (optional / cosmetic)
       setTimeout(() => {
         displayEl.textContent = displayDigits;
       }, Math.min(rawDigits.length * 120, 3000));
@@ -290,7 +341,6 @@
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
 
-    // Switch from right/bottom anchoring to explicit left/top for dragging
     panel.style.left = rect.left + "px";
     panel.style.top = rect.top + "px";
     panel.style.right = "auto";
