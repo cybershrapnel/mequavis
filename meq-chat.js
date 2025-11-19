@@ -61,7 +61,7 @@ window.MeqChat = (function () {
   // ---------------------------------------------------------------------------
   async function callPhpProxy(provider, model, messages) {
     try {
-      const res = await fetch("chat-proxy.php", {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -352,7 +352,7 @@ window.MeqChat = (function () {
 
   async function loadSessionList() {
     try {
-      const res = await fetch("chat-proxy.php", {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "list_sessions" })
@@ -370,7 +370,7 @@ window.MeqChat = (function () {
 
   async function loadSessionFromServer(sessionId) {
     try {
-      const res = await fetch("chat-proxy.php", {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -425,7 +425,7 @@ window.MeqChat = (function () {
     renderSessionList();
 
     try {
-      await fetch("chat-proxy.php", {
+      await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -455,7 +455,7 @@ window.MeqChat = (function () {
     renderSessionList();
 
     try {
-      await fetch("chat-proxy.php", {
+      await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
