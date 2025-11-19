@@ -167,7 +167,7 @@ function appendFormattedMessage(sender, text) {
   // - Anything else (room usernames) → msg-user (Hide User Chat affects these)
   if (isAISender(sender)) {
     msgDiv.classList.add("msg-ai");
-  } else if (sender === "You") {
+  } else if (sender === "You" || sender === "User Query") {
     msgDiv.classList.add("msg-self");
   } else if (sender === "System") {
     msgDiv.classList.add("msg-system");
