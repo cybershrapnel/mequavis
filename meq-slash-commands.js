@@ -279,23 +279,37 @@
   // ---------------------------------------------------------------------------
 
   async function handleSlashCommand(fullText) {
-    const trimmed = (fullText || "").trim();
-    if (!trimmed.startsWith("/")) return null;
+  const trimmed = (fullText || "").trim();
+  if (!trimmed.startsWith("/")) return null;
 
-    const withoutSlash = trimmed.slice(1);
-    const parts = withoutSlash.split(/\s+/);
-    const cmd = (parts[0] || "").toLowerCase();
-    const argsText = parts.slice(1).join(" ");
+  const withoutSlash = trimmed.slice(1);
+  const parts = withoutSlash.split(/\s+/);
+  const cmd = (parts[0] || "").toLowerCase();
+  const argsText = parts.slice(1).join(" ");
 
-    let reply = "";
+  // 🔹 NEW: pull the active session from MeqChat if available
+  let sessionId = null;
+  if (window.MeqChat && typeof window.MeqChat.getCurrentSessionId === "function") {
+    sessionId = window.MeqChat.getCurrentSessionId();
+  }
+
+      let reply = "";
+    let meta  = null;
+
     try {
+      const currentSessionId =
+        window.MeqChat && typeof window.MeqChat.getCurrentSessionId === "function"
+          ? window.MeqChat.getCurrentSessionId()
+          : null;
+
       const res = await fetch(SLASH_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           command: cmd,
           text: argsText,
-          raw: trimmed
+          raw: trimmed,
+          session_id: currentSessionId || ""
         })
       });
 
@@ -304,10 +318,21 @@
         reply = `[Slash error ${res.status}]: ${txt}`;
       } else {
         const data = await res.json().catch(() => ({}));
-        reply = data.reply || "[Slash command returned empty reply]";
+        meta  = data || {};
+        reply = meta.reply || "[Slash command returned empty reply]";
       }
     } catch (err) {
       reply = "[Slash network error: " + err.message + "]";
+    }
+
+    // Update frontend session state if slash-proxy returned a session_id
+    if (
+      meta &&
+      meta.session_id &&
+      window.MeqChat &&
+      typeof window.MeqChat.adoptSessionFromSlash === "function"
+    ) {
+      window.MeqChat.adoptSessionFromSlash(meta);
     }
 
     // Show it in the main log using your existing appendAIMessage hook
@@ -317,7 +342,9 @@
     }
 
     return reply;
-  }
+
+}
+
 
   function patchMeqChatSend() {
     if (!window.MeqChat || typeof window.MeqChat.send !== "function") {
