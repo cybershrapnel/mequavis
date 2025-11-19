@@ -61,7 +61,7 @@ window.MeqChat = (function () {
   // ---------------------------------------------------------------------------
   async function callPhpProxy(provider, model, messages) {
     try {
-      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+      const res = await fetch("chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -95,6 +95,56 @@ window.MeqChat = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // SMALL MARKDOWN-ISH FORMATTER
+  // - escapes HTML
+  // - preserves newlines
+  // - renders `inline code` as <code>…</code>
+  // ---------------------------------------------------------------------------
+  function formatStreamText(text) {
+    if (!text) return "";
+
+    // Escape HTML
+    let escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    // Backticked inline code → <code>...</code>
+    // e.g. `exp(i S[φ] / ħ)`
+    escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    // Newlines → <br>
+    escaped = escaped.replace(/\r\n|\r|\n/g, "<br>");
+
+    return escaped;
+  }
+
+  // ---------------------------------------------------------------------------
+  // APPEND A FULLY-FORMATTED MESSAGE (USED FOR HISTORY + NON-STREAMED)
+  // ---------------------------------------------------------------------------
+  function appendFormattedMessage(sender, text) {
+    if (!aiOutputEl) return;
+
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "msg";
+
+    const senderSpan = document.createElement("span");
+    senderSpan.className = "sender";
+    senderSpan.textContent = sender + ": ";
+
+    const contentSpan = document.createElement("span");
+    contentSpan.className = "streamed-text";
+    contentSpan.innerHTML = formatStreamText(text);
+
+    msgDiv.appendChild(senderSpan);
+    msgDiv.appendChild(contentSpan);
+    aiOutputEl.appendChild(msgDiv);
+
+    const scrollEl = rightMiddleEl || aiOutputEl.parentElement || aiOutputEl;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------------------
   // STREAMING / CHUNKED OUTPUT (WORD/TOKEN-BASED) + AUTO-SCROLL
   // ---------------------------------------------------------------------------
   function streamAIReply(senderLabel, fullText) {
@@ -125,11 +175,16 @@ window.MeqChat = (function () {
     const tokens = fullText.match(/(\s+|[^\s]+)/g) || [];
     let idx = 0;
     const delay = 40;
+    let renderedSoFar = "";
 
     function step() {
       if (idx >= tokens.length) return;
       const nextToken = tokens[idx++];
-      contentSpan.textContent += nextToken;
+      renderedSoFar += nextToken;
+
+      // Re-render with formatting: newlines + `code`
+      contentSpan.innerHTML = formatStreamText(renderedSoFar);
+
       scrollEl.scrollTop = scrollEl.scrollHeight;
       setTimeout(step, delay);
     }
@@ -297,7 +352,7 @@ window.MeqChat = (function () {
 
   async function loadSessionList() {
     try {
-      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+      const res = await fetch("chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "list_sessions" })
@@ -315,7 +370,7 @@ window.MeqChat = (function () {
 
   async function loadSessionFromServer(sessionId) {
     try {
-      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+      const res = await fetch("chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -343,19 +398,12 @@ window.MeqChat = (function () {
         aiOutputEl.innerHTML = "";
       }
 
+      // Re-render history with formatting (line breaks + inline code)
       msgs.forEach(msg => {
         const role = msg.role || "";
         const content = msg.content || "";
         const sender = role === "user" ? "You" : "AI";
-
-        if (typeof window.appendAIMessage === "function") {
-          window.appendAIMessage(sender, content);
-        } else if (aiOutputEl) {
-          const div = document.createElement("div");
-          div.className = "msg";
-          div.textContent = `${sender}: ${content}`;
-          aiOutputEl.appendChild(div);
-        }
+        appendFormattedMessage(sender, content);
       });
 
       upsertSession(currentSessionId, currentSessionCreatedAt, ownerFlag, title, favorite);
@@ -377,7 +425,7 @@ window.MeqChat = (function () {
     renderSessionList();
 
     try {
-      await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+      await fetch("chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -407,7 +455,7 @@ window.MeqChat = (function () {
     renderSessionList();
 
     try {
-      await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+      await fetch("chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -612,6 +660,17 @@ window.MeqChat = (function () {
       body.chat-full-active #rightTop .action-btn[data-action="full-chat"] {
         display: block;
       }
+
+      /* Streamed text: preserve line breaks */
+      #aiOutput .streamed-text {
+        white-space: normal;
+      }
+
+      /* Inline code / formulas: subtle monospace, no big boxes */
+      #aiOutput code {
+        font-family: monospace;
+        font-size: 11px;
+      }
     `;
     document.head.appendChild(style);
 
@@ -640,6 +699,9 @@ window.MeqChat = (function () {
   createSessionPanel();
   createRightInfoPanel();
   loadSessionList();
+
+  // Override the global appendAIMessage so existing code uses the formatter too
+  window.appendAIMessage = appendFormattedMessage;
 
   return {
     send
