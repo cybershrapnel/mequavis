@@ -21,6 +21,41 @@ canvas {
   transform-origin: center center;
 }
 
+/* === Global MEQUAVIS Scrollbar Theme === */
+
+/* Colors */
+:root {
+  --scroll-track: #050505;       /* dark panel background */
+  --scroll-thumb: #0ff;          /* cyan like borders/buttons */
+  --scroll-thumb-hover: #9ff;    /* lighter cyan on hover */
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+/* WebKit (Chrome, Edge, etc.) */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 4px;
+  border: 1px solid #033;          /* subtle deep blue border */
+  box-shadow: 0 0 4px #033 inset;  /* slight inner glow */
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
 
 
 
@@ -1259,6 +1294,7 @@ document.getElementById("layoutBtn").addEventListener("click",()=>{ compact = !c
 
 <script src="meq-chat.js"></script>
 <script src="meq-room-chat.js"></script>
+<script src="meq-music.js"></script>
 <script>
   window.MathJax = {
     tex: {
