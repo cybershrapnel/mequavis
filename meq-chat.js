@@ -894,6 +894,9 @@ function appendFormattedMessage(sender, text) {
     });
   }
 
+
+
+
   // ---------------------------------------------------------------------------
   // INIT
   // ---------------------------------------------------------------------------
@@ -904,6 +907,16 @@ function appendFormattedMessage(sender, text) {
 
   // Override the global appendAIMessage so existing code + room chat use formatter
   window.appendAIMessage = appendFormattedMessage;
+
+  // 🔹 Auto-activate FULL CHAT MODE once this file is loaded
+  if (fullChatBtn) {
+    // Small timeout so the CSS + layout are ready, feels like a transition
+    setTimeout(() => {
+      if (!document.body.classList.contains("chat-full-active")) {
+        fullChatBtn.click();
+      }
+    }, 500); // tweak delay if you want a snappier/slower feel
+  }
 
   return {
     send
