@@ -62,8 +62,7 @@
   // Ensure label is correct
   tvBtn.textContent = "WATCH AI CABLE TV";
 
-  // 2) Create the TV panel (same geometry as AI MUSIC), but
-  //    we only create a container for the YT Player, not a static iframe.
+  // 2) Create the TV panel (same geometry as AI MUSIC), but flex column so video fits
   const panel = document.createElement("div");
   panel.id = "tvPanel";
   panel.style.cssText = `
@@ -78,6 +77,8 @@
     z-index: 999;
     padding: 0;
     box-sizing: border-box;
+    display: none;           /* we will set to flex in openPanel() */
+    flex-direction: column;  /* header + player container */
   `;
 
   panel.innerHTML = `
@@ -91,24 +92,45 @@
       font-family:monospace;
       font-size:12px;
       color:#0ff;
+      gap: 6px;
     ">
       <span>AI CABLE TV • YouTube Playlist</span>
-      <button id="tvPanelClose" style="
-        background:#111;
-        color:#0ff;
-        border:1px solid #0ff;
-        font-family:monospace;
-        font-size:11px;
-        padding:2px 8px;
-        cursor:pointer;
-      ">CLOSE</button>
+      <div style="display:flex; gap:4px;">
+        <button id="tvPanelNext" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">NEXT VIDEO</button>
+        <button id="tvPanelClose" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">CLOSE</button>
+      </div>
     </div>
-    <div id="tvPlayerContainer" style="width:100%;height:calc(100% - 28px);"></div>
+    <div
+      id="tvPlayerContainer"
+      style="
+        width:100%;
+        flex: 1 1 auto;
+        height:auto;
+        overflow:hidden;
+      ">
+    </div>
   `;
 
   document.body.appendChild(panel);
 
   const closeBtn = panel.querySelector("#tvPanelClose");
+  const nextBtn  = panel.querySelector("#tvPanelNext");
   const playerContainerId = "tvPlayerContainer";
 
   // 3) YouTube IFrame API loader & player
@@ -161,7 +183,6 @@
     const firstId = getNextVideoId();
     if (!firstId) return;
 
-    // Make sure container is empty
     const container = document.getElementById(playerContainerId);
     if (!container) return;
     container.innerHTML = "";
@@ -215,7 +236,8 @@
 
   // 4) Panel controls
   function openPanel() {
-    panel.style.display = "block";
+    // use flex so header + player container layout nicely
+    panel.style.display = "flex";
 
     // Fresh shuffle each time we open (optional – comment out if you want persistent order)
     shufflePlaylist();
@@ -232,7 +254,7 @@
 
   // 5) Wire up button toggling
   tvBtn.addEventListener("click", () => {
-    if (panel.style.display === "block") {
+    if (panel.style.display === "flex") {
       closePanel();
     } else {
       openPanel();
@@ -241,6 +263,12 @@
 
   if (closeBtn) {
     closeBtn.addEventListener("click", closePanel);
+  }
+
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      playNextVideo();
+    });
   }
 
   // Optional: safety on unload
