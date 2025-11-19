@@ -110,7 +110,6 @@ window.MeqChat = (function () {
       .replace(/>/g, "&gt;");
 
     // Backticked inline code → <code>...</code>
-    // e.g. `exp(i S[φ] / ħ)`
     escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
 
     // Newlines → <br>
@@ -217,6 +216,7 @@ window.MeqChat = (function () {
     contextMenuEl.id = "sessionContextMenu";
     contextMenuEl.innerHTML = `
       <div data-menu-action="rename">Rename Session</div>
+      <div data-menu-action="delete">Delete Session</div>
     `;
     document.body.appendChild(contextMenuEl);
 
@@ -240,11 +240,9 @@ window.MeqChat = (function () {
       <h2>MEQUA Info Panel</h2>
       <div id="chatInfoContent">
         <div style="font-size:11px; color:#0ff;">
-          <!-- Placeholder content; you can replace this later -->
-          
           <p><img src="ncz.png"></p>
-<p>MEQUA News:</p>
-<p>Gemini 2.0 Flash model is active for use.</p>
+          <p>MEQUA News:</p>
+          <p>Gemini 2.0 Flash model is active for use.</p>
         </div>
       </div>
     `;
@@ -319,7 +317,9 @@ window.MeqChat = (function () {
       labelSpan.textContent = text;
       entry.appendChild(labelSpan);
 
+      // --- Favorite indicators ---
       if (s.owner) {
+        // Our own sessions: green interactive star
         const favBtn = document.createElement("button");
         favBtn.className = "fav-btn " + (s.favorite ? "solid" : "hollow");
         favBtn.textContent = s.favorite ? "★" : "☆";
@@ -331,7 +331,15 @@ window.MeqChat = (function () {
         });
 
         entry.appendChild(favBtn);
+      } else if (s.favorite) {
+        // Not owned by us, but favorited by its owner: red star
+        const foreignFav = document.createElement("span");
+        foreignFav.className = "fav-foreign";
+        foreignFav.textContent = "★";
+        foreignFav.title = "Favorited by owner";
+        entry.appendChild(foreignFav);
       }
+      // Non-owned & not favorite => nothing
 
       entry.dataset.sessionId = s.id;
 
@@ -342,7 +350,7 @@ window.MeqChat = (function () {
 
       entry.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        if (!s.owner) return; // only owner can rename
+        if (!s.owner) return; // only owner can rename / delete
         showContextMenu(s.id, e.pageX, e.pageY);
       });
 
@@ -470,7 +478,55 @@ window.MeqChat = (function () {
   }
 
   // ---------------------------------------------------------------------------
-  // CONTEXT MENU (RENAME)
+  // DELETE SESSION (SOFT DELETE → MOVED TO DELETED FOLDER)
+  // ---------------------------------------------------------------------------
+  async function deleteSession(sessionId) {
+    const s = sessions.find(x => x.id === sessionId);
+    if (!s || !s.owner) return;
+
+    const ok = window.confirm("Delete this session? It will be hidden for all users (soft delete).");
+    if (!ok) return;
+
+    try {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete_session",
+          session_id: sessionId
+        })
+      });
+
+      if (!res.ok) {
+        console.error("Failed to delete session", sessionId, res.status);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.error) {
+        console.error("Delete error:", data.error);
+        return;
+      }
+
+      // Remove from local list
+      sessions = sessions.filter(x => x.id !== sessionId);
+
+      // If we were viewing it, clear current
+      if (currentSessionId === sessionId) {
+        currentSessionId = null;
+        currentSessionCreatedAt = null;
+        state.messages = [];
+        if (aiOutputEl) aiOutputEl.innerHTML = "";
+      }
+
+      renderSessionList();
+    } catch (err) {
+      console.error("Error deleting session:", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // CONTEXT MENU (RENAME / DELETE)
   // ---------------------------------------------------------------------------
   function showContextMenu(sessionId, x, y) {
     if (!contextMenuEl) return;
@@ -495,6 +551,8 @@ window.MeqChat = (function () {
 
     if (action === "rename") {
       renameSession(sid);
+    } else if (action === "delete") {
+      deleteSession(sid);
     }
   }
 
@@ -506,6 +564,14 @@ window.MeqChat = (function () {
 
     const style = document.createElement("style");
     style.textContent = `
+      #chatSessionPanel .fav-foreign {
+        flex: 0 0 auto;
+        padding: 0 4px;
+        font-size: 13px;
+        color: #f00;      /* red star for other people's favorites */
+        opacity: 0.9;
+      }
+
       /* Chat session panel (left) */
       #chatSessionPanel {
         position: fixed;
