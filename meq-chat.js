@@ -13,6 +13,15 @@ window.MeqChat = (function () {
   let contextMenuEl           = null;
   let contextMenuSessionId    = null;
 
+  // Session list filters
+  const filters = {
+    hideFav:      false,
+    hideNonFav:   false,
+    hideOthers:   false,
+    hideSelf:     false,
+    search:       ""
+  };
+
   const state = {
     messages: [] // { role: "user" | "assistant", content: string }
   };
@@ -96,9 +105,6 @@ window.MeqChat = (function () {
 
   // ---------------------------------------------------------------------------
   // SMALL MARKDOWN-ISH FORMATTER
-  // - escapes HTML
-  // - preserves newlines
-  // - renders `inline code` as <code>…</code>
   // ---------------------------------------------------------------------------
   function formatStreamText(text) {
     if (!text) return "";
@@ -181,7 +187,6 @@ window.MeqChat = (function () {
       const nextToken = tokens[idx++];
       renderedSoFar += nextToken;
 
-      // Re-render with formatting: newlines + `code`
       contentSpan.innerHTML = formatStreamText(renderedSoFar);
 
       scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -201,6 +206,15 @@ window.MeqChat = (function () {
     panel.id = "chatSessionPanel";
     panel.innerHTML = `
       <h2>Chat Sessions</h2>
+      <div id="sessionFilters">
+        <label><input type="checkbox" id="filterHideFav"> Hide favorited</label>
+        <label><input type="checkbox" id="filterHideNonFav"> Hide non-favorited</label>
+        <label><input type="checkbox" id="filterHideOthers"> Hide sessions from others</label>
+        <label><input type="checkbox" id="filterHideSelf"> Hide my sessions</label>
+        <div id="sessionSearch">
+          <input type="text" id="sessionSearchInput" placeholder="Search sessions...">
+        </div>
+      </div>
       <button id="newSessionBtn">NEW SESSION</button>
       <div id="sessionList"></div>
     `;
@@ -209,6 +223,44 @@ window.MeqChat = (function () {
     const newBtn = panel.querySelector("#newSessionBtn");
     if (newBtn) {
       newBtn.addEventListener("click", startNewSession);
+    }
+
+    // Hook up filters
+    const hideFavCb    = panel.querySelector("#filterHideFav");
+    const hideNonFavCb = panel.querySelector("#filterHideNonFav");
+    const hideOthersCb = panel.querySelector("#filterHideOthers");
+    const hideSelfCb   = panel.querySelector("#filterHideSelf");
+    const searchInput  = panel.querySelector("#sessionSearchInput");
+
+    if (hideFavCb) {
+      hideFavCb.addEventListener("change", () => {
+        filters.hideFav = hideFavCb.checked;
+        renderSessionList();
+      });
+    }
+    if (hideNonFavCb) {
+      hideNonFavCb.addEventListener("change", () => {
+        filters.hideNonFav = hideNonFavCb.checked;
+        renderSessionList();
+      });
+    }
+    if (hideOthersCb) {
+      hideOthersCb.addEventListener("change", () => {
+        filters.hideOthers = hideOthersCb.checked;
+        renderSessionList();
+      });
+    }
+    if (hideSelfCb) {
+      hideSelfCb.addEventListener("change", () => {
+        filters.hideSelf = hideSelfCb.checked;
+        renderSessionList();
+      });
+    }
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        filters.search = searchInput.value.toLowerCase();
+        renderSessionList();
+      });
     }
 
     // Context menu
@@ -267,7 +319,7 @@ window.MeqChat = (function () {
     if (existing) {
       if (createdAt && !existing.created_at) existing.created_at = createdAt;
       if (typeof owner === "boolean") existing.owner = owner;
-      if (typeof title === "string") existing.title = title;
+      if (typeof title === "string")  existing.title = title;
       if (typeof favorite === "boolean") existing.favorite = favorite;
     } else {
       sessions.push({
@@ -287,13 +339,28 @@ window.MeqChat = (function () {
     const listEl = panel.querySelector("#sessionList");
     if (!listEl) return;
 
-    if (!sessions.length) {
-      listEl.innerHTML = `<div class="session-entry">No sessions yet</div>`;
-      return;
-    }
-
     listEl.innerHTML = "";
+
+    let any = false;
+
     sessions.forEach(s => {
+      // Apply filters
+      if (filters.hideFav && s.favorite) return;
+      if (filters.hideNonFav && !s.favorite) return;
+      if (filters.hideOthers && !s.owner) return;
+      if (filters.hideSelf && s.owner) return;
+
+      if (filters.search) {
+        const haystack = (
+          (s.title || "") + " " +
+          (s.created_at || "") + " " +
+          s.id
+        ).toLowerCase();
+        if (!haystack.includes(filters.search)) return;
+      }
+
+      any = true;
+
       const entry = document.createElement("div");
       entry.className = "session-entry";
       if (s.id === currentSessionId) {
@@ -317,7 +384,7 @@ window.MeqChat = (function () {
       labelSpan.textContent = text;
       entry.appendChild(labelSpan);
 
-      // --- Favorite indicators ---
+      // Favorite indicators
       if (s.owner) {
         // Our own sessions: green interactive star
         const favBtn = document.createElement("button");
@@ -339,7 +406,6 @@ window.MeqChat = (function () {
         foreignFav.title = "Favorited by owner";
         entry.appendChild(foreignFav);
       }
-      // Non-owned & not favorite => nothing
 
       entry.dataset.sessionId = s.id;
 
@@ -350,12 +416,16 @@ window.MeqChat = (function () {
 
       entry.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        if (!s.owner) return; // only owner can rename / delete
+        if (!s.owner) return; // only owner can rename/delete
         showContextMenu(s.id, e.pageX, e.pageY);
       });
 
       listEl.appendChild(entry);
     });
+
+    if (!any) {
+      listEl.innerHTML = `<div class="session-entry">No sessions match filters</div>`;
+    }
   }
 
   async function loadSessionList() {
@@ -477,14 +547,15 @@ window.MeqChat = (function () {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // DELETE SESSION (SOFT DELETE → MOVED TO DELETED FOLDER)
-  // ---------------------------------------------------------------------------
   async function deleteSession(sessionId) {
     const s = sessions.find(x => x.id === sessionId);
     if (!s || !s.owner) return;
 
-    const ok = window.confirm("Delete this session? It will be hidden for all users (soft delete).");
+    const baseName = s.title && s.title.trim()
+      ? s.title.trim()
+      : (s.created_at || s.id);
+
+    const ok = window.confirm(`Delete session:\n\n${baseName}\n\nThis will move it to the deleted folder on the server and hide it from all users.`);
     if (!ok) return;
 
     try {
@@ -498,25 +569,21 @@ window.MeqChat = (function () {
       });
 
       if (!res.ok) {
-        console.error("Failed to delete session", sessionId, res.status);
-        return;
-      }
-
-      const data = await res.json();
-      if (data.error) {
-        console.error("Delete error:", data.error);
+        console.error("Failed to delete session", sessionId);
         return;
       }
 
       // Remove from local list
       sessions = sessions.filter(x => x.id !== sessionId);
 
-      // If we were viewing it, clear current
+      // If we just deleted the current session, reset current chat state
       if (currentSessionId === sessionId) {
         currentSessionId = null;
         currentSessionCreatedAt = null;
         state.messages = [];
-        if (aiOutputEl) aiOutputEl.innerHTML = "";
+        if (aiOutputEl) {
+          aiOutputEl.innerHTML = "";
+        }
       }
 
       renderSessionList();
@@ -526,7 +593,7 @@ window.MeqChat = (function () {
   }
 
   // ---------------------------------------------------------------------------
-  // CONTEXT MENU (RENAME / DELETE)
+  // CONTEXT MENU (RENAME + DELETE)
   // ---------------------------------------------------------------------------
   function showContextMenu(sessionId, x, y) {
     if (!contextMenuEl) return;
@@ -596,6 +663,7 @@ window.MeqChat = (function () {
       }
       #chatSessionPanel #newSessionBtn {
         width: 100%;
+        margin-top: 6px;
         margin-bottom: 6px;
         padding: 4px;
         background: #111;
@@ -647,6 +715,39 @@ window.MeqChat = (function () {
       #chatSessionPanel .fav-btn.hollow {
         color: #0f0;
         opacity: 0.4;
+      }
+
+      /* Filters + search block */
+      #sessionFilters {
+        margin-top: 8px;
+        border-top: 1px solid #222;
+        padding-top: 4px;
+        font-size: 10px;
+      }
+      #sessionFilters label {
+        display: block;
+        margin-top: 2px;
+        cursor: pointer;
+      }
+      #sessionFilters input[type="checkbox"] {
+        margin-right: 4px;
+      }
+      #sessionSearch {
+        margin-top: 6px;
+      }
+      #sessionSearchInput {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 3px 4px;
+        background: #111;
+        border: 1px solid #0ff;
+        color: #0ff;
+        font-family: monospace;
+        font-size: 10px;
+        border-radius: 3px;
+      }
+      #sessionSearchInput::placeholder {
+        color: #088;
       }
 
       /* Right info/ads panel (right side) */
@@ -732,7 +833,7 @@ window.MeqChat = (function () {
         white-space: normal;
       }
 
-      /* Inline code / formulas: subtle monospace, no big boxes */
+      /* Inline code / formulas */
       #aiOutput code {
         font-family: monospace;
         font-size: 11px;
