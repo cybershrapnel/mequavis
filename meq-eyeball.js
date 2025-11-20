@@ -9,9 +9,10 @@
 //        (ALPHA/BETA/GAMMA/DELTA ↔ OMEGA) when available.
 //      * Second line: Eye → nearest locked BIG (ALPHA/BETA/GAMMA/DELTA), solid color.
 //      * Third line: Eye → nearest small circle INSIDE ANY BIG NOFUR ONLY, solid color.
+//        (3rd line is active ANY time OMEGA is locked, even if no 2nd line exists.)
 //
 // Left column UI (under Nofur Locks, above Segments):
-//  - Shows 3 lines:
+//  - Shows 3 lines (when enabled):
 //      Eye Link 1 → <primaryLabel>
 //      Eye Link 2 → <secondaryLabel or ->
 //      Eye Link 3 → <thirdParentLabel or -> node <thirdNodeNum or ->
@@ -20,6 +21,16 @@
 //      5:   second line color (if present)
 //      6:   third line color (if present)
 //      =   7: blend of all non-null colors (cumulative hybrid)
+//  - Bridge Nodes summary (always updating, even when eye is disabled):
+//      ALPHA/BETA/GAMMA/DELTA → node <locked node if locked, else live contact>
+//      OMEGA → node <locked node only when locked, else "-">
+//  - Button under Bridge Nodes:
+//      [Disable Seeker Eye] / [Enable Seeker Eye]
+//
+//  - When eye is disabled:
+//      * No movement, no lines.
+//      * Eye is drawn parked at the center of the Sierpinski box area.
+//      * Panel shows "Eye disabled" + Bridge Nodes + toggle button.
 
 (function () {
   if (window._meqEyeballPatched) return;
@@ -29,6 +40,11 @@
   if (typeof originalRAF !== "function") {
     console.warn("[meq-eyeball] requestAnimationFrame not available.");
     return;
+  }
+
+  // Global enable/disable flag
+  if (typeof window._meqEyeEnabled === "undefined") {
+    window._meqEyeEnabled = true;
   }
 
   const bigLabels = new Set(["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"]);
@@ -194,13 +210,13 @@
     return "#0ff";
   }
 
-  function drawEyeballOnly() {
+  function drawEyeballAt(x, y) {
     if (!eyeball || typeof ctx === "undefined") return;
 
     ctx.save();
 
     ctx.beginPath();
-    ctx.arc(eyeball.x, eyeball.y, eyeball.radius, 0, Math.PI * 2);
+    ctx.arc(x, y, eyeball.radius, 0, Math.PI * 2);
     ctx.fillStyle = "#ffffff";
     ctx.fill();
     ctx.lineWidth = 2;
@@ -208,16 +224,44 @@
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(eyeball.x, eyeball.y, eyeball.radius * 0.45, 0, Math.PI * 2);
+    ctx.arc(x, y, eyeball.radius * 0.45, 0, Math.PI * 2);
     ctx.fillStyle = "#00aaff";
     ctx.fill();
 
     ctx.beginPath();
-    ctx.arc(eyeball.x, eyeball.y, eyeball.radius * 0.2, 0, Math.PI * 2);
+    ctx.arc(x, y, eyeball.radius * 0.2, 0, Math.PI * 2);
     ctx.fillStyle = "#000000";
     ctx.fill();
 
     ctx.restore();
+  }
+
+  function drawEyeballOnly() {
+    if (!eyeball) return;
+    drawEyeballAt(eyeball.x, eyeball.y);
+  }
+
+  // When disabled: park the eye at center of Sierpinski box area.
+  function drawEyeballDisabled() {
+    if (!eyeball || typeof ctx === "undefined") return;
+    try {
+      if (typeof center !== "undefined") {
+        // From drawSierpinskiBox in main script:
+        // boxWidth = 250, boxHeight = 250,
+        // boxX = center.x - boxWidth/2;
+        // boxY = center.y - 380;
+        // So center of box is (center.x, center.y - 380 + 125) = center.y - 255.
+        const sx = center.x;
+        const sy = center.y - 225;
+        drawEyeballAt(sx, sy);
+      } else if (typeof W !== "undefined" && typeof H !== "undefined") {
+        drawEyeballAt(W / 2, H / 2 - 200);
+      } else {
+        drawEyeballAt(eyeball.x, eyeball.y);
+      }
+    } catch {
+      drawEyeballAt(eyeball.x, eyeball.y);
+    }
   }
 
   function drawSegmentedLine(x1, y1, x2, y2, colors) {
@@ -346,6 +390,13 @@
       if (typeof ctx === "undefined") return;
       if (!eyeball) return;
 
+      // If eye disabled: no lines, just draw parked eye near Sierpinski box.
+      if (!window._meqEyeEnabled) {
+        window._meqEyeballStatus = null;
+        drawEyeballDisabled();
+        return;
+      }
+
       let nodes = [];
       if (Array.isArray(window.nofurs)) {
         nodes = window.nofurs;
@@ -354,7 +405,6 @@
       }
 
       if (!nodes.length) {
-        drawEyeballOnly();
         window._meqEyeballStatus = null;
         return;
       }
@@ -391,7 +441,7 @@
 
       let targetNode = null;
 
-      // === CASE A: OMEGA locked ===
+      // CASE A: OMEGA locked → tri-line mode.
       if (omegaLock.locked && omegaCenter) {
         targetNode = omegaCenter;
         primaryLabel = "OMEGA";
@@ -403,7 +453,7 @@
           primaryColor = getBridgeColor("OMEGA");
         }
 
-        // SECONDARY: nearest locked big (ALPHA/BETA/GAMMA/DELTA)
+        // Second line: nearest locked big (if any)
         const candidates = ["ALPHA", "BETA", "GAMMA", "DELTA"];
         let bestDist = Infinity;
         let bestNode = null;
@@ -439,34 +489,31 @@
           secondaryColor = getBridgeColor(bestLabel);
         }
 
-        // THIRD: nearest small circle in BIG nofurs (only if we have a second line)
-        if (secondaryTarget && secondaryColor) {
-          const smallNodes = computeBigSmallNodes();
-          let bestSmall = null;
-          let bestSmallDist = Infinity;
+        // Third line: ALWAYS active when OMEGA locked,
+        // to nearest small circle in any big nofur (even if no secondary).
+        const smallNodes = computeBigSmallNodes();
+        let bestSmall = null;
+        let bestSmallDist = Infinity;
 
-          for (const sn of smallNodes) {
-            if (!sn) continue;
-
-            const dxE = eyeball.x - sn.x;
-            const dyE = eyeball.y - sn.y;
-            const d2E = dxE * dxE + dyE * dyE;
-
-            if (d2E < bestSmallDist) {
-              bestSmallDist = d2E;
-              bestSmall = sn;
-            }
-          }
-
-          if (bestSmall) {
-            thirdTarget = { center: { x: bestSmall.x, y: bestSmall.y } };
-            thirdColor = bestSmall.color || "#ffffff";
-            thirdNodeNum = bestSmall.num;
-            thirdParentLabel = bestSmall.parentLabel || null;
+        for (const sn of smallNodes) {
+          if (!sn) continue;
+          const dxE = eyeball.x - sn.x;
+          const dyE = eyeball.y - sn.y;
+          const d2E = dxE * dxE + dyE * dyE;
+          if (d2E < bestSmallDist) {
+            bestSmallDist = d2E;
+            bestSmall = sn;
           }
         }
+
+        if (bestSmall) {
+          thirdTarget = { center: { x: bestSmall.x, y: bestSmall.y } };
+          thirdColor = bestSmall.color || "#ffffff";
+          thirdNodeNum = bestSmall.num;
+          thirdParentLabel = bestSmall.parentLabel || null;
+        }
       } else {
-        // === CASE B: Normal (OMEGA not locked) ===
+        // CASE B: Normal behavior.
         let closest = null;
         let bestDist = Infinity;
 
@@ -498,7 +545,7 @@
         }
       }
 
-      // --- Draw primary line ---
+      // Primary line
       if (targetNode && targetNode.center) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -519,7 +566,7 @@
         }
       }
 
-      // --- Draw secondary line ---
+      // Second line
       if (secondaryTarget && secondaryTarget.center && secondaryColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -536,7 +583,7 @@
         ctx.restore();
       }
 
-      // --- Draw third line ---
+      // Third line
       if (thirdTarget && thirdTarget.center && thirdColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -573,9 +620,173 @@
 
   function renderSeekerStatusDom() {
     const panel = document.getElementById("segmentLog");
-    const status = window._meqEyeballStatus;
-    if (!panel || !status) return;
+    if (!panel) return;
 
+    const enabled = !!window._meqEyeEnabled;
+    const status = window._meqEyeballStatus;
+
+    // ---- Ensure stable container + content div + button ----
+    let container = document.getElementById("seekerStatus");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "seekerStatus";
+      container.style.marginTop = "4px";
+      container.style.borderTop = "1px solid #222";
+      container.style.paddingTop = "4px";
+
+      const headers = Array.from(panel.querySelectorAll("h2,h3"));
+      const segmentsHeader = headers.find((h) =>
+        /segments/i.test(h.textContent || "")
+      );
+      if (segmentsHeader && segmentsHeader.parentNode === panel) {
+        panel.insertBefore(container, segmentsHeader);
+      } else {
+        panel.appendChild(container);
+      }
+    }
+
+    let content = document.getElementById("seekerStatusContent");
+    if (!content) {
+      content = document.createElement("div");
+      content.id = "seekerStatusContent";
+      container.appendChild(content);
+    }
+
+    let btn = document.getElementById("toggleEyeBtn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "toggleEyeBtn";
+      btn.style.marginTop = "4px";
+      btn.style.marginBottom = "4px"; // spacing after button
+      btn.style.padding = "3px 6px";
+      btn.style.fontSize = "10px";
+      btn.style.background = "#111";
+      btn.style.color = "#0ff";
+      btn.style.border = "1px solid #0ff";
+      btn.style.borderRadius = "3px";
+      btn.style.cursor = "pointer";
+      btn.addEventListener("click", function () {
+        window._meqEyeEnabled = !window._meqEyeEnabled;
+      });
+      container.appendChild(btn);
+    }
+
+    btn.textContent = enabled ? "Disable Seeker Eye" : "Enable Seeker Eye";
+
+    // Helper: compute live outerIndex for a given label
+    function currentOuterIndexFor(label) {
+      try {
+        if (
+          typeof seekerAngles === "undefined" ||
+          typeof outerOrder === "undefined" ||
+          typeof rot === "undefined"
+        ) {
+          return null;
+        }
+        const anglesArr = seekerAngles[label];
+        if (!anglesArr || !anglesArr.length) return null;
+
+        const seekerAngle = anglesArr[0];
+        const factor = rotationFactors[label] || 1.0;
+        const rotationVal = rot * factor;
+
+        const radiusOuter = 100;
+        const seekerRadius = radiusOuter + 45;
+
+        const sx = Math.cos(seekerAngle) * seekerRadius;
+        const sy = Math.sin(seekerAngle) * seekerRadius;
+
+        let bestIndex = null;
+        let bestDist2 = Infinity;
+
+        for (let i = 0; i < outerOrder.length; i++) {
+          const angle =
+            (i / outerOrder.length) * Math.PI * 2 -
+            Math.PI / 2 +
+            rotationVal;
+          const x = Math.cos(angle) * radiusOuter;
+          const y = Math.sin(angle) * radiusOuter;
+          const dx = sx - x;
+          const dy = sy - y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestDist2) {
+            bestDist2 = d2;
+            bestIndex = i;
+          }
+        }
+        return bestIndex;
+      } catch {
+        return null;
+      }
+    }
+
+    function buildBridgeNodesHtml() {
+      let html = `<div style="font-size:10px;color:#0ff;margin-top:4px;">Bridge Nodes:<br>`;
+      const lockState = window.nofurLockState || {};
+      const bigList = ["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"];
+
+      if (typeof outerOrder !== "undefined" && Array.isArray(outerOrder)) {
+        for (const label of bigList) {
+          let nodeTxt = "-";
+          const ls = lockState[label];
+
+          if (label === "OMEGA") {
+            if (
+              ls &&
+              ls.locked &&
+              typeof ls.outerIndex === "number" &&
+              ls.outerIndex >= 0 &&
+              ls.outerIndex < outerOrder.length
+            ) {
+              nodeTxt = outerOrder[ls.outerIndex];
+            }
+          } else {
+            let idx = null;
+
+            if (
+              ls &&
+              ls.locked &&
+              typeof ls.outerIndex === "number" &&
+              ls.outerIndex >= 0 &&
+              ls.outerIndex < outerOrder.length
+            ) {
+              idx = ls.outerIndex;
+            } else {
+              idx = currentOuterIndexFor(label);
+            }
+
+            if (idx != null && idx >= 0 && idx < outerOrder.length) {
+              nodeTxt = outerOrder[idx];
+            }
+          }
+
+          html += `${label} → node ${nodeTxt}<br>`;
+        }
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    // ---- Build ONLY the inner HTML for seekerStatusContent ----
+    let html = `<h3 style="font-size:11px;color:#0ff;margin:4px 0 2px;">Seeker Links</h3>`;
+
+    if (!enabled || !status) {
+      // Eye disabled or no status: show disabled text + live Bridge Nodes
+      html += `<div style="font-size:10px;color:#888;">
+        Seeker eye is currently <span style="color:#f33;">DISABLED</span>.
+      </div>`;
+
+      html += buildBridgeNodesHtml();
+
+      // Blank line before button
+      html += `<br>`;
+
+      content.innerHTML = html;
+      return;
+    }
+
+    // ---- Eye enabled & we have status: full UI ----
     const {
       primaryLabel,
       primaryHybridColors,
@@ -586,26 +797,6 @@
       thirdColor
     } = status;
 
-    let box = document.getElementById("seekerStatus");
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "seekerStatus";
-      box.style.marginTop = "4px";
-      box.style.borderTop = "1px solid #222";
-      box.style.paddingTop = "4px";
-
-      const headers = Array.from(panel.querySelectorAll("h2,h3"));
-      const segmentsHeader = headers.find((h) =>
-        /segments/i.test(h.textContent || "")
-      );
-      if (segmentsHeader && segmentsHeader.parentNode === panel) {
-        panel.insertBefore(box, segmentsHeader);
-      } else {
-        panel.appendChild(box);
-      }
-    }
-
-    let html = `<h3 style="font-size:11px;color:#0ff;margin:4px 0 2px;">Seeker Links</h3>`;
     html += `<div style="font-size:10px;color:#0ff;">`;
 
     html += `Eye Link 1 → ${primaryLabel || "-"}`;
@@ -659,15 +850,24 @@
       }
     });
 
-    html += `<br /></div><br />`;
+    html += `</div>`;
 
-    box.innerHTML = html;
+    // Live Bridge Nodes (same as when disabled)
+    html += buildBridgeNodesHtml();
+
+    // Blank line before button
+    html += `<br>`;
+
+    content.innerHTML = html;
   }
 
   function eyeballStep() {
     ensureEyeballInit();
     if (!eyeball) return;
-    updateEyeball();
+
+    if (window._meqEyeEnabled) {
+      updateEyeball();
+    }
     drawEyeballAndLink();
   }
 
@@ -681,6 +881,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line big-only + 7-swatch seeker UI, geom-based 3rd line)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line big-only + 7-swatch seeker UI + live bridge-node summary + parked-eye-on-disable + labeled Eye Links)."
   );
 })();
