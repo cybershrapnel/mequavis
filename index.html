@@ -945,17 +945,25 @@ function drawOmniverse(baseX,baseY,rot,scale=1,isSmall=false,isLeft=false,isRigh
       if(nf.id==="GAMMA") baseDigit = 9;
       if(nf.id==="OMEGA") baseDigit = 1;
     }
+let addressStr = "";  // local address we will display/use
+
 if (isSmall && baseDigit !== null) {
-  // First-time creation → assign address from baseDigit if missing
-  if (!nf.address) nf.address = String(baseDigit);
-
-  // Current visible layer is (pyramidLayers - activeLayers) + 1
   const currentLayer = (pyramidLayers - activeLayers) + 1;
-  const displayLayer = currentLayer + 1;  // Layer number for small nofurs
+  const displayLayer = currentLayer + 1;
 
-  // Dynamic label: L(layer+1)-O[address]
-  label = `L${displayLayer}-O` + nf.address;
+  // ✅ keep left/right addresses separate on the shared baseOffsets objects
+  const key = isLeft ? "leftAddress" : (isRight ? "rightAddress" : null);
+
+  if (key) {
+    if (!nf[key]) nf[key] = String(baseDigit);  // first-time seed
+    addressStr = nf[key];
+  } else {
+    addressStr = String(baseDigit);
+  }
+
+  label = `L${displayLayer}-O` + addressStr;
 }
+
 
 
 
