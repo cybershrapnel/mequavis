@@ -12,7 +12,7 @@
 //        (3rd line is active ANY time OMEGA is locked, even if no 2nd line exists.)
 //
 // Left column UI (under Nofur Locks, above Segments):
-//  - Shows 3 lines (when enabled):
+//  - Shows 3 links (when enabled):
 //      Eye Link 1 → <primaryLabel>
 //      Eye Link 2 → <secondaryLabel or ->
 //      Eye Link 3 → <thirdParentLabel or -> node <thirdNodeNum or ->
@@ -24,13 +24,19 @@
 //  - Bridge Nodes summary (always updating, even when eye is disabled):
 //      ALPHA/BETA/GAMMA/DELTA → node <locked node if locked, else live contact>
 //      OMEGA → node <locked node only when locked, else "-">
-//  - Button under Bridge Nodes:
+//  - Controls:
 //      [Disable Seeker Eye] / [Enable Seeker Eye]
+//      [Follow Mouse] / [Stop Following]
+//      Eye Speed slider: 0 → stopped, up to 100 (internally 0–10× base speed)
+//      [Auto Eye Traverse] / [Stop Auto Traverse]
+//        → when enabled, whenever Eye Link 1 is connected to a SMALL nofur
+//           (flag "left"/"right"), simulate a click on that small nofur,
+//           BUT never twice in a row on the same one (by label+flag+baseDigit).
 //
 //  - When eye is disabled:
 //      * No movement, no lines.
 //      * Eye is drawn parked at the center of the Sierpinski box area.
-//      * Panel shows "Eye disabled" + Bridge Nodes + toggle button.
+//      * Panel shows "Eye disabled" + Bridge Nodes + controls.
 
 (function () {
   if (window._meqEyeballPatched) return;
@@ -42,9 +48,19 @@
     return;
   }
 
-  // Global enable/disable flag
+  // Global flags
   if (typeof window._meqEyeEnabled === "undefined") {
     window._meqEyeEnabled = true;
+  }
+  if (typeof window._meqEyeFollowMouse === "undefined") {
+    window._meqEyeFollowMouse = false;
+  }
+  if (typeof window._meqEyeSpeedScale === "undefined") {
+    // Slider value 0..100, default ~ baseline
+    window._meqEyeSpeedScale = 10.0;
+  }
+  if (typeof window._meqEyeAutoTraverse === "undefined") {
+    window._meqEyeAutoTraverse = false;
   }
 
   const bigLabels = new Set(["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"]);
@@ -58,9 +74,38 @@
 
   let eyeball = null;
 
+  // Mouse-follow target (canvas coords)
+  let mouseTarget = { x: null, y: null };
+  let mouseListenerAttached = false;
+
+  // Auto-traverse: last small nofur we triggered on (by label+flag+baseDigit)
+  let lastTraverseNodeKey = null;
+
+  function attachMouseListener() {
+    if (mouseListenerAttached) return;
+    if (typeof canvas === "undefined" || !canvas) return;
+
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      mouseTarget.x = (e.clientX - rect.left) * scaleX;
+      mouseTarget.y = (e.clientY - rect.top) * scaleY;
+    });
+
+    mouseListenerAttached = true;
+  }
+
+  function getSpeedScale() {
+    const s = window._meqEyeSpeedScale;
+    if (typeof s !== "number" || isNaN(s)) return 10.0;
+    return Math.max(0, Math.min(100, s));
+  }
+
   function ensureEyeballInit() {
     try {
-      if (typeof canvas === "undefined") return;
+      if (typeof canvas === "undefined" || !canvas) return;
       if (!eyeball) {
         const width = typeof W !== "undefined" ? W : canvas.width;
         const height = typeof H !== "undefined" ? H : canvas.height;
@@ -70,7 +115,7 @@
           y: height / 2,
           vx: 2.1,
           vy: -1.4,
-          speed: 2.5,
+          baseSpeed: 2.5,
           radius: 12
         };
       }
@@ -79,16 +124,23 @@
     }
   }
 
-  function updateEyeball() {
+  // Random wander
+  function updateEyeballRandom() {
     if (!eyeball) return;
     if (typeof W === "undefined" || typeof H === "undefined") return;
+
+    const sliderVal = getSpeedScale();  // 0..100
+    const norm = sliderVal / 10;        // 0..10
+    const speed = eyeball.baseSpeed * norm; // 0.. ~25 px/frame
+
+    if (speed <= 0) return; // frozen
 
     const maxTurn = 0.08;
     const turn = (Math.random() - 0.5) * 2 * maxTurn;
     const angle = Math.atan2(eyeball.vy, eyeball.vx) + turn;
 
-    eyeball.vx = Math.cos(angle) * eyeball.speed;
-    eyeball.vy = Math.sin(angle) * eyeball.speed;
+    eyeball.vx = Math.cos(angle) * speed;
+    eyeball.vy = Math.sin(angle) * speed;
 
     eyeball.x += eyeball.vx;
     eyeball.y += eyeball.vy;
@@ -104,6 +156,43 @@
       eyeball.vy *= -1;
       eyeball.y = Math.max(marginY, Math.min(H - marginY, eyeball.y));
     }
+  }
+
+  // Follow mouse
+  function updateEyeballFollowMouse() {
+    if (!eyeball) return;
+    if (typeof W === "undefined" || typeof H === "undefined") return;
+
+    const sliderVal = getSpeedScale();  // 0..100
+    const norm = sliderVal / 10;        // 0..10
+    const maxStep = norm * 5;           // 0..50 px/frame
+
+    if (maxStep <= 0) return; // stopped
+
+    if (mouseTarget.x == null || mouseTarget.y == null) {
+      updateEyeballRandom();
+      return;
+    }
+
+    const dx = mouseTarget.x - eyeball.x;
+    const dy = mouseTarget.y - eyeball.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+
+    const step = Math.min(maxStep, dist);
+    const moveX = (dx / dist) * step;
+    const moveY = (dy / dist) * step;
+
+    eyeball.vx = moveX;
+    eyeball.vy = moveY;
+
+    eyeball.x += moveX;
+    eyeball.y += moveY;
+
+    const marginX = 260;
+    const marginY = 40;
+
+    eyeball.x = Math.max(marginX, Math.min(W - marginX, eyeball.x));
+    eyeball.y = Math.max(marginY, Math.min(H - marginY, eyeball.y));
   }
 
   function blendColors(c1, c2) {
@@ -241,16 +330,10 @@
     drawEyeballAt(eyeball.x, eyeball.y);
   }
 
-  // When disabled: park the eye at center of Sierpinski box area.
   function drawEyeballDisabled() {
     if (!eyeball || typeof ctx === "undefined") return;
     try {
       if (typeof center !== "undefined") {
-        // From drawSierpinskiBox in main script:
-        // boxWidth = 250, boxHeight = 250,
-        // boxX = center.x - boxWidth/2;
-        // boxY = center.y - 380;
-        // So center of box is (center.x, center.y - 380 + 125) = center.y - 255.
         const sx = center.x;
         const sy = center.y - 225;
         drawEyeballAt(sx, sy);
@@ -288,7 +371,6 @@
     }
   }
 
-  // Recompute all small circles inside BIG nofurs, independent of drawNode.
   function computeBigSmallNodes() {
     const result = [];
     try {
@@ -385,12 +467,59 @@
     return result;
   }
 
+  function simulateCanvasClickAt(px, py) {
+    try {
+      if (typeof canvas === "undefined" || !canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const clientX = rect.left + (px / canvas.width) * rect.width;
+      const clientY = rect.top + (py / canvas.height) * rect.height;
+
+      const evt = new MouseEvent("click", {
+        clientX,
+        clientY,
+        bubbles: true,
+        cancelable: true,
+        view: window
+      });
+      canvas.dispatchEvent(evt);
+    } catch (e) {
+      console.warn("[meq-eyeball] simulateCanvasClickAt error:", e);
+    }
+  }
+
+  // Auto traverse: when Eye Link 1 is on a SMALL nofur (left/right),
+  // simulate click once, but NEVER for the same (label+flag+baseDigit) twice in a row.
+  // Auto traverse: when Eye Link 1 is on a SMALL nofur (left/right),
+  // simulate click once, but NEVER for the same (flag+baseDigit) twice in a row.
+  function maybeAutoTraverse(targetNode) {
+    if (!window._meqEyeAutoTraverse) return;
+    if (!targetNode || !targetNode.center) return;
+
+    // Only small nofur wheels, not big rings / small circles
+    if (targetNode.flag !== "left" && targetNode.flag !== "right") return;
+    if (typeof targetNode.baseDigit !== "number") return;
+
+    // 🔑 STABLE identity for this small wheel:
+    //    - flag: "left" or "right"
+    //    - baseDigit: 2,3,4,5,6,7,8,9,0,1
+    const key = `${targetNode.flag}:${targetNode.baseDigit}`;
+
+    // Same small nofur as last time we auto-fired → do nothing
+    if (key === lastTraverseNodeKey) {
+      return;
+    }
+
+    // New small nofur → trigger once and remember
+    simulateCanvasClickAt(targetNode.center.x, targetNode.center.y);
+    lastTraverseNodeKey = key;
+  }
+
+
   function drawEyeballAndLink() {
     try {
       if (typeof ctx === "undefined") return;
       if (!eyeball) return;
 
-      // If eye disabled: no lines, just draw parked eye near Sierpinski box.
       if (!window._meqEyeEnabled) {
         window._meqEyeballStatus = null;
         drawEyeballDisabled();
@@ -441,7 +570,7 @@
 
       let targetNode = null;
 
-      // CASE A: OMEGA locked → tri-line mode.
+      // A: OMEGA locked → tri-line mode
       if (omegaLock.locked && omegaCenter) {
         targetNode = omegaCenter;
         primaryLabel = "OMEGA";
@@ -453,7 +582,7 @@
           primaryColor = getBridgeColor("OMEGA");
         }
 
-        // Second line: nearest locked big (if any)
+        // Second line: nearest locked big among ALPHA/BETA/GAMMA/DELTA
         const candidates = ["ALPHA", "BETA", "GAMMA", "DELTA"];
         let bestDist = Infinity;
         let bestNode = null;
@@ -489,8 +618,7 @@
           secondaryColor = getBridgeColor(bestLabel);
         }
 
-        // Third line: ALWAYS active when OMEGA locked,
-        // to nearest small circle in any big nofur (even if no secondary).
+        // Third line: nearest small circle in any big nofur
         const smallNodes = computeBigSmallNodes();
         let bestSmall = null;
         let bestSmallDist = Infinity;
@@ -512,8 +640,10 @@
           thirdNodeNum = bestSmall.num;
           thirdParentLabel = bestSmall.parentLabel || null;
         }
+
+        // In OMEGA-locked mode, auto-traverse is not used.
       } else {
-        // CASE B: Normal behavior.
+        // B: Normal behavior
         let closest = null;
         let bestDist = Infinity;
 
@@ -543,8 +673,20 @@
         } else {
           primaryColor = "#0ff";
         }
-      }
 
+        // Auto eye traverse in normal mode only
+        maybeAutoTraverse(targetNode);
+      }
+      // 🔁 Reset last small-click whenever Eye Link 1 is on a BIG nofur wheel
+      // (i.e., not a small left/right wheel). This lets us click the same
+      // small wheel twice in a row as long as we "touch" a big wheel in between.
+      if (
+        targetNode &&
+        targetNode.flag !== "left" &&
+        targetNode.flag !== "right"
+      ) {
+        lastTraverseNodeKey = null;
+      }
       // Primary line
       if (targetNode && targetNode.center) {
         const x1 = eyeball.x;
@@ -623,9 +765,11 @@
     if (!panel) return;
 
     const enabled = !!window._meqEyeEnabled;
+    const follow = !!window._meqEyeFollowMouse;
+    const autoTrav = !!window._meqEyeAutoTraverse;
+    const speedScale = getSpeedScale();
     const status = window._meqEyeballStatus;
 
-    // ---- Ensure stable container + content div + button ----
     let container = document.getElementById("seekerStatus");
     if (!container) {
       container = document.createElement("div");
@@ -652,28 +796,125 @@
       container.appendChild(content);
     }
 
-    let btn = document.getElementById("toggleEyeBtn");
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = "toggleEyeBtn";
-      btn.style.marginTop = "4px";
-      btn.style.marginBottom = "4px"; // spacing after button
-      btn.style.padding = "3px 6px";
-      btn.style.fontSize = "10px";
-      btn.style.background = "#111";
-      btn.style.color = "#0ff";
-      btn.style.border = "1px solid #0ff";
-      btn.style.borderRadius = "3px";
-      btn.style.cursor = "pointer";
-      btn.addEventListener("click", function () {
-        window._meqEyeEnabled = !window._meqEyeEnabled;
-      });
-      container.appendChild(btn);
+    let btnRow = document.getElementById("seekerButtonRow");
+    if (!btnRow) {
+      btnRow = document.createElement("div");
+      btnRow.id = "seekerButtonRow";
+      btnRow.style.marginTop = "4px";
+      btnRow.style.display = "flex";
+      btnRow.style.gap = "4px";
+      container.appendChild(btnRow);
     }
 
-    btn.textContent = enabled ? "Disable Seeker Eye" : "Enable Seeker Eye";
+    let toggleBtn = document.getElementById("toggleEyeBtn");
+    if (!toggleBtn) {
+      toggleBtn = document.createElement("button");
+      toggleBtn.id = "toggleEyeBtn";
+      toggleBtn.style.flex = "1 1 auto";
+      toggleBtn.style.padding = "3px 6px";
+      toggleBtn.style.fontSize = "10px";
+      toggleBtn.style.background = "#111";
+      toggleBtn.style.color = "#0ff";
+      toggleBtn.style.border = "1px solid #0ff";
+      toggleBtn.style.borderRadius = "3px";
+      toggleBtn.style.cursor = "pointer";
+      toggleBtn.addEventListener("click", function () {
+        window._meqEyeEnabled = !window._meqEyeEnabled;
+      });
+      btnRow.appendChild(toggleBtn);
+    }
+    toggleBtn.textContent = enabled ? "Disable Seeker Eye" : "Enable Seeker Eye";
 
-    // Helper: compute live outerIndex for a given label
+    let followBtn = document.getElementById("followEyeBtn");
+    if (!followBtn) {
+      followBtn = document.createElement("button");
+      followBtn.id = "followEyeBtn";
+      followBtn.style.flex = "1 1 auto";
+      followBtn.style.padding = "3px 6px";
+      followBtn.style.fontSize = "10px";
+      followBtn.style.background = "#111";
+      followBtn.style.color = "#0ff";
+      followBtn.style.border = "1px solid #0ff";
+      followBtn.style.borderRadius = "3px";
+      followBtn.style.cursor = "pointer";
+      followBtn.addEventListener("click", function () {
+        window._meqEyeFollowMouse = !window._meqEyeFollowMouse;
+      });
+      btnRow.appendChild(followBtn);
+    }
+    followBtn.textContent = follow ? "Stop Following" : "Follow Mouse";
+
+    let speedRow = document.getElementById("eyeSpeedRow");
+    if (!speedRow) {
+      speedRow = document.createElement("div");
+      speedRow.id = "eyeSpeedRow";
+      speedRow.style.marginTop = "4px";
+      speedRow.style.marginBottom = "4px";
+      speedRow.style.fontSize = "10px";
+      speedRow.style.color = "#0ff";
+
+      const label = document.createElement("span");
+      label.textContent = "Eye Speed: ";
+
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.id = "eyeSpeedSlider";
+      slider.min = "0";
+      slider.max = "100";
+      slider.step = "0.5";
+      slider.value = String(speedScale);
+      slider.style.width = "140px";
+      slider.style.margin = "0 4px";
+
+      const valSpan = document.createElement("span");
+      valSpan.id = "eyeSpeedValue";
+      valSpan.textContent = speedScale.toFixed(1);
+
+      slider.addEventListener("input", () => {
+        const v = parseFloat(slider.value);
+        window._meqEyeSpeedScale = isNaN(v) ? 10.0 : v;
+        valSpan.textContent = getSpeedScale().toFixed(1);
+      });
+
+      speedRow.appendChild(label);
+      speedRow.appendChild(slider);
+      speedRow.appendChild(valSpan);
+
+      container.appendChild(speedRow);
+    } else {
+      const valSpan = document.getElementById("eyeSpeedValue");
+      if (valSpan) {
+        valSpan.textContent = speedScale.toFixed(1);
+      }
+    }
+
+    let autoRow = document.getElementById("autoEyeRow");
+    if (!autoRow) {
+      autoRow = document.createElement("div");
+      autoRow.id = "autoEyeRow";
+      autoRow.style.marginTop = "4px";
+
+      const autoBtn = document.createElement("button");
+      autoBtn.id = "autoEyeBtn";
+      autoBtn.style.padding = "3px 6px";
+      autoBtn.style.fontSize = "10px";
+      autoBtn.style.background = "#111";
+      autoBtn.style.color = "#0ff";
+      autoBtn.style.border = "1px solid #0ff";
+      autoBtn.style.borderRadius = "3px";
+      autoBtn.style.cursor = "pointer";
+      autoBtn.addEventListener("click", function () {
+        window._meqEyeAutoTraverse = !window._meqEyeAutoTraverse;
+      });
+
+      autoRow.appendChild(autoBtn);
+      container.appendChild(autoRow);
+    }
+    const autoBtn = document.getElementById("autoEyeBtn");
+    if (autoBtn) {
+      autoBtn.textContent = autoTrav ? "Stop Auto Traverse" : "Auto Eye Traverse";
+    }
+
     function currentOuterIndexFor(label) {
       try {
         if (
@@ -768,25 +1009,18 @@
       return html;
     }
 
-    // ---- Build ONLY the inner HTML for seekerStatusContent ----
     let html = `<h3 style="font-size:11px;color:#0ff;margin:4px 0 2px;">Seeker Links</h3>`;
 
     if (!enabled || !status) {
-      // Eye disabled or no status: show disabled text + live Bridge Nodes
       html += `<div style="font-size:10px;color:#888;">
         Seeker eye is currently <span style="color:#f33;">DISABLED</span>.
       </div>`;
-
       html += buildBridgeNodesHtml();
-
-      // Blank line before button
       html += `<br>`;
-
       content.innerHTML = html;
       return;
     }
 
-    // ---- Eye enabled & we have status: full UI ----
     const {
       primaryLabel,
       primaryHybridColors,
@@ -798,17 +1032,14 @@
     } = status;
 
     html += `<div style="font-size:10px;color:#0ff;">`;
-
     html += `Eye Link 1 → ${primaryLabel || "-"}`;
     html += `<br>Eye Link 2 → ${secondaryLabel || "-"}`;
     html += `<br>Eye Link 3 → ${
       thirdParentLabel || "-"
     } node ${thirdNodeNum != null ? thirdNodeNum : "-"}`;
-
     html += `</div>`;
 
     const baseCols = new Array(6).fill(null);
-
     if (Array.isArray(primaryHybridColors)) {
       for (let i = 0; i < 4; i++) {
         baseCols[i] = primaryHybridColors[i] || null;
@@ -824,7 +1055,6 @@
     }
 
     html += `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center;">`;
-
     baseCols.forEach((c, idx) => {
       const bg = c || "transparent";
       const border = c ? "#0ff" : "#333";
@@ -849,24 +1079,24 @@
         "></div>`;
       }
     });
-
     html += `</div>`;
 
-    // Live Bridge Nodes (same as when disabled)
     html += buildBridgeNodesHtml();
-
-    // Blank line before button
     html += `<br>`;
-
     content.innerHTML = html;
   }
 
   function eyeballStep() {
     ensureEyeballInit();
+    attachMouseListener();
     if (!eyeball) return;
 
     if (window._meqEyeEnabled) {
-      updateEyeball();
+      if (window._meqEyeFollowMouse) {
+        updateEyeballFollowMouse();
+      } else {
+        updateEyeballRandom();
+      }
     }
     drawEyeballAndLink();
   }
@@ -881,6 +1111,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line big-only + 7-swatch seeker UI + live bridge-node summary + parked-eye-on-disable + labeled Eye Links)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse with no repeated small nofur)."
   );
 })();
