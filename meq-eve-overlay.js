@@ -1,6 +1,8 @@
 // meq-eve-overlay.js (ES module version)
 // Eve stands by the big GAMMA wheel, faces left, walks between positions,
 // and uses her walk animation + pause-facing-camera wave on turns.
+// Now supports user-controlled movement via arrow keys + space jump,
+// plus PageUp/PageDown for vertical movement and up/down arrows to change facing.
 
 import * as THREE from "https://unpkg.com/three@0.163.0/build/three.module.js";
 import { GLTFLoader } from "https://unpkg.com/three@0.163.0/examples/jsm/loaders/GLTFLoader.js";
@@ -48,8 +50,14 @@ const EVE_TURN_WAVE_DURATION = window.EVE_TURN_WAVE_DURATION || 3000; // 3 secon
 const EVE_WALK_CLIP_INDEX = window.EVE_WALK_CLIP_INDEX ?? 0;
 
 // --- PERFORMANCE TUNING ---
-const EVE_TARGET_FPS  = window.EVE_TARGET_FPS  || 15;  // lower = less CPU/GPU
+const EVE_TARGET_FPS  = window.EVE_TARGET_FPS  || 15;   // lower = less CPU/GPU
 const EVE_PIXEL_RATIO = window.EVE_PIXEL_RATIO || 0.75; // 0.5–1.0 for speed
+
+// --- USER CONTROL TUNING ---
+const EVE_USER_IDLE_TIMEOUT_MS = window.EVE_USER_IDLE_TIMEOUT_MS || 10000; // 10s idle -> auto return
+const EVE_MOVE_SPEED           = window.EVE_MOVE_SPEED           || 350;   // px/s for arrow/Page move
+const EVE_JUMP_SPEED           = window.EVE_JUMP_SPEED           || 950;   // initial jump velocity
+const EVE_JUMP_GRAVITY         = window.EVE_JUMP_GRAVITY         || -3000; // gravity (px/s^2)
 
 const canvas = document.getElementById("mequavis");
 if (!canvas) {
@@ -116,15 +124,43 @@ if (canvas) {
   let basePosX = 0;
   let basePosY = -100; // default before we find GAMMA
 
-  // States:
-  // "waveHome"        -> at original spot, facing left, side-wave
-  // "walkLeft"        -> walk left
-  // "turnLeftToRight" -> at left spot, face camera 3s, forward-wave, then face right
-  // "waveAway"        -> at left spot, facing right, side-wave
-  // "walkRight"       -> walk back to original
-  // "turnRightToLeft" -> at home, face camera 3s, forward-wave, then face left
+  // Actual Eve position (world/screen space in our ortho scene)
+  let evePosX = 0;
+  let evePosY = -100;
+  let hasHomePosition = false;
+
+  // Jump state
+  let eveJumpOffset = 0;
+  let isJumping = false;
+  let jumpVelocity = 0;
+
+  // Modes:
+  // "script"    -> original scripted behavior (wave/walk/turn)
+  // "user"      -> keyboard control via arrow keys + space
+  // "returning" -> auto-walk back to home after idle in user mode
+  let eveMode = "script";
+
+  // Script state machine:
   let eveState = "waveHome";
   let stateStartTime = 0;
+
+  // Auto-return state
+  let returnStartTime = 0;
+  let returnFromX = 0;
+  let returnFromY = 0;
+  let returnFaceY = EVE_FACE_Y;
+
+  // Keyboard tracking
+  const keysDown = {
+    left: false,
+    right: false,
+    vertUp: false,   // PageUp
+    vertDown: false  // PageDown
+  };
+  let lastUserInputTime = 0;
+
+  // User-facing orientation in user mode
+  let eveUserFacingY = EVE_FACE_Y;
 
   // FPS throttling
   const FRAME_DURATION = 1000 / EVE_TARGET_FPS;
@@ -381,6 +417,346 @@ if (canvas) {
   }
 
   // ---------------------------
+  // EDITABLE TARGET DETECTION
+  // ---------------------------
+  function isEditableTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName ? target.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea") return true;
+    if (target.isContentEditable) return true;
+    return false;
+  }
+
+  // ---------------------------
+  // USER INPUT HANDLERS
+  // ---------------------------
+  function markUserInput() {
+    lastUserInputTime = performance.now();
+    if (eveMode !== "user") {
+      eveMode = "user";
+      // when entering user mode, stop scripted waving/walk and go neutral
+      setWalking(false);
+      setArmsNeutral();
+      // reset jump so she starts from ground
+      eveJumpOffset = 0;
+      isJumping = false;
+      jumpVelocity = 0;
+      // capture current facing as the base user facing
+      if (eveRoot) {
+        eveUserFacingY = eveRoot.rotation.y;
+      }
+    }
+  }
+
+  function handleKeyDown(e) {
+    const key = e.key;
+
+    // Don't interfere with typing in inputs, textareas, or contentEditable
+    const t = e.target || document.activeElement;
+    if (isEditableTarget(t)) {
+      return;
+    }
+
+    // Only care about arrow keys + space + PageUp/PageDown outside of text inputs
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "PageUp", "PageDown"].includes(key) || e.code === "Space") {
+      e.preventDefault();
+    }
+
+    if (!eveRoot) return;
+
+    switch (key) {
+      case "ArrowLeft":
+        keysDown.left = true;
+        eveUserFacingY = EVE_FACE_Y; // side left
+        markUserInput();
+        break;
+      case "ArrowRight":
+        keysDown.right = true;
+        eveUserFacingY = EVE_FACE_Y + Math.PI; // side right
+        markUserInput();
+        break;
+
+      // Up/Down: facing only (no movement)
+      case "ArrowDown":
+        // face forward toward camera
+        eveUserFacingY = EVE_FACE_CAMERA_Y;
+        markUserInput();
+        break;
+      case "ArrowUp":
+        // face away from camera
+        eveUserFacingY = EVE_FACE_CAMERA_Y + Math.PI;
+        markUserInput();
+        break;
+
+      // Vertical movement keys
+      case "PageUp":
+        keysDown.vertUp = true;
+        markUserInput();
+        break;
+      case "PageDown":
+        keysDown.vertDown = true;
+        markUserInput();
+        break;
+
+      case " ":
+      case "Spacebar":
+        markUserInput();
+        if (!isJumping) {
+          isJumping = true;
+          eveJumpOffset = 0;
+          jumpVelocity = EVE_JUMP_SPEED;
+        }
+        break;
+    }
+  }
+
+  function handleKeyUp(e) {
+    const key = e.key;
+
+    const t = e.target || document.activeElement;
+    if (isEditableTarget(t)) {
+      return;
+    }
+
+    if (!eveRoot) return;
+
+    switch (key) {
+      case "ArrowLeft":
+        keysDown.left = false;
+        markUserInput();
+        break;
+      case "ArrowRight":
+        keysDown.right = false;
+        markUserInput();
+        break;
+      case "PageUp":
+        keysDown.vertUp = false;
+        markUserInput();
+        break;
+      case "PageDown":
+        keysDown.vertDown = false;
+        markUserInput();
+        break;
+      case " ":
+      case "Spacebar":
+        // don't need to mark here, but it's fine to extend idle a bit
+        markUserInput();
+        break;
+    }
+  }
+
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("keyup", handleKeyUp);
+
+  // ---------------------------
+  // SCRIPTED STATE MACHINE
+  // ---------------------------
+  function runScripted(now) {
+    if (!stateStartTime) stateStartTime = now;
+
+    const stateTime = now - stateStartTime;
+    let offsetX = 0;
+    let rotationY = EVE_FACE_Y; // default left
+
+    switch (eveState) {
+      case "waveHome":
+        // Original position, facing left, waving (arms at side)
+        setWalking(false);
+        rotationY = EVE_FACE_Y;
+        offsetX = 0;
+        setArmsWaveSide(now);
+        if (stateTime > EVE_WAVE_DURATION) {
+          eveState = "walkLeft";
+          stateStartTime = now;
+        }
+        break;
+
+      case "walkLeft": {
+        // Walk left using Eve's walk animation
+        setWalking(true);
+        const t = Math.min(stateTime / EVE_WALK_DURATION, 1);
+        offsetX = -EVE_WALK_DISTANCE * t;
+        // Walk clip owns the arms here
+        if (t >= 1) {
+          eveState = "turnLeftToRight";
+          stateStartTime = now;
+        }
+        rotationY = EVE_FACE_Y;
+        break;
+      }
+
+      case "turnLeftToRight":
+        // At left spot, face camera, arms forward + wave
+        setWalking(false);
+        offsetX = -EVE_WALK_DISTANCE;
+        rotationY = EVE_FACE_CAMERA_Y;
+        setArmsWaveForward(now);
+        if (stateTime > EVE_TURN_WAVE_DURATION) {
+          eveState = "waveAway";
+          stateStartTime = now;
+        }
+        break;
+
+      case "waveAway":
+        // At left spot, turned around (facing right), side-wave
+        setWalking(false);
+        rotationY = EVE_FACE_Y + Math.PI;
+        offsetX = -EVE_WALK_DISTANCE;
+        setArmsWaveSide(now);
+        if (stateTime > EVE_WAVE_DURATION) {
+          eveState = "walkRight";
+          stateStartTime = now;
+        }
+        break;
+
+      case "walkRight": {
+        // Walk back to original spot
+        setWalking(true);
+        const t = Math.min(stateTime / EVE_WALK_DURATION, 1);
+        offsetX = -EVE_WALK_DISTANCE * (1 - t);
+        rotationY = EVE_FACE_Y + Math.PI;
+        if (t >= 1) {
+          eveState = "turnRightToLeft";
+          stateStartTime = now;
+        }
+        break;
+      }
+
+      case "turnRightToLeft":
+        // At home spot, face camera, arms forward + wave
+        setWalking(false);
+        offsetX = 0;
+        rotationY = EVE_FACE_CAMERA_Y;
+        setArmsWaveForward(now);
+        if (stateTime > EVE_TURN_WAVE_DURATION) {
+          eveState = "waveHome";
+          stateStartTime = now;
+        }
+        break;
+    }
+
+    eveJumpOffset = 0;
+    isJumping = false;
+    jumpVelocity = 0;
+
+    evePosX = basePosX + offsetX;
+    evePosY = basePosY;
+
+    eveRoot.position.set(evePosX, evePosY, EVE_Z);
+    eveRoot.rotation.y = rotationY;
+  }
+
+  // ---------------------------
+  // USER CONTROLLED MOVEMENT
+  // ---------------------------
+  function runUserControl(now, deltaSec) {
+    let movingHoriz = false;
+
+    // Horizontal movement
+    if (keysDown.left && !keysDown.right) {
+      evePosX -= EVE_MOVE_SPEED * deltaSec;
+      eveUserFacingY = EVE_FACE_Y; // side left
+      movingHoriz = true;
+    } else if (keysDown.right && !keysDown.left) {
+      evePosX += EVE_MOVE_SPEED * deltaSec;
+      eveUserFacingY = EVE_FACE_Y + Math.PI; // side right
+      movingHoriz = true;
+    }
+
+    // Vertical movement with PageUp/PageDown
+    if (keysDown.vertUp && !keysDown.vertDown) {
+      evePosY += EVE_MOVE_SPEED * deltaSec;
+    } else if (keysDown.vertDown && !keysDown.vertUp) {
+      evePosY -= EVE_MOVE_SPEED * deltaSec;
+    }
+
+    // Constrain X to a band around base (same as scripted left limit, mirrored right)
+    const minX = basePosX - EVE_WALK_DISTANCE;
+    const maxX = basePosX + EVE_WALK_DISTANCE;
+    evePosX = Math.max(minX, Math.min(maxX, evePosX));
+
+    // Constrain Y to canvas bounds
+    const minY = -canvas.height / 2;
+    const maxY = canvas.height / 2;
+    evePosY = Math.max(minY, Math.min(maxY, evePosY));
+
+    // Walking anim when moving horizontally
+    if (movingHoriz) {
+      setWalking(true);
+    } else {
+      setWalking(false);
+    }
+
+    // Jump physics (relative to current evePosY "ground" in user mode)
+    if (isJumping) {
+      jumpVelocity += EVE_JUMP_GRAVITY * deltaSec;
+      eveJumpOffset += jumpVelocity * deltaSec;
+      if (eveJumpOffset <= 0) {
+        eveJumpOffset = 0;
+        isJumping = false;
+        jumpVelocity = 0;
+      }
+    }
+
+    const finalY = evePosY + eveJumpOffset;
+
+    // If not walking or jumping, keep arms neutral so clip doesn't fight us
+    if (!movingHoriz && !isJumping) {
+      setArmsNeutral();
+    }
+
+    eveRoot.position.set(evePosX, finalY, EVE_Z);
+    eveRoot.rotation.y = eveUserFacingY;
+  }
+
+  // ---------------------------
+  // AUTO RETURN TO HOME
+  // ---------------------------
+  function startReturnHome(now) {
+    eveMode = "returning";
+    returnStartTime = now;
+    returnFromX = evePosX;
+    returnFromY = evePosY; // capture current vertical position too
+
+    // Stop any jump
+    eveJumpOffset = 0;
+    isJumping = false;
+    jumpVelocity = 0;
+
+    const goingRight = basePosX > returnFromX;
+    returnFaceY = goingRight ? (EVE_FACE_Y + Math.PI) : EVE_FACE_Y;
+
+    setWalking(true);
+    setArmsNeutral();
+  }
+
+  function runReturnHome(now) {
+    if (!returnStartTime) {
+      startReturnHome(now);
+      return;
+    }
+
+    const t = Math.min((now - returnStartTime) / EVE_WALK_DURATION, 1);
+
+    // Smooth diagonal walk back to base (no snapping)
+    evePosX = returnFromX + (basePosX - returnFromX) * t;
+    evePosY = returnFromY + (basePosY - returnFromY) * t;
+
+    eveRoot.position.set(evePosX, evePosY, EVE_Z);
+    eveRoot.rotation.y = returnFaceY;
+
+    if (t >= 1) {
+      // Arrived home: resume scripted behavior
+      setWalking(false);
+      eveMode = "script";
+      eveState = "waveHome";
+      stateStartTime = now;
+      returnStartTime = 0;
+      eveUserFacingY = EVE_FACE_Y;
+    }
+  }
+
+  // ---------------------------
   // Animation loop
   // ---------------------------
   function animate(now) {
@@ -410,8 +786,6 @@ if (canvas) {
     }
 
     if (eveRoot) {
-      if (!stateStartTime) stateStartTime = now;
-
       const gamma = findGammaCenter();
       if (gamma && gamma.center) {
         const p = toOverlayCoords(gamma.center.x, gamma.center.y);
@@ -419,89 +793,28 @@ if (canvas) {
         basePosY = p.y + EVE_OFFSET_Y;
       }
 
-      const stateTime = now - stateStartTime;
-      let offsetX = 0;
-      let rotationY = EVE_FACE_Y; // default left
-
-      switch (eveState) {
-        case "waveHome":
-          // Original position, facing left, waving (arms at side)
-          setWalking(false);
-          rotationY = EVE_FACE_Y;
-          offsetX = 0;
-          setArmsWaveSide(now);
-          if (stateTime > EVE_WAVE_DURATION) {
-            eveState = "walkLeft";
-            stateStartTime = now;
-          }
-          break;
-
-        case "walkLeft": {
-          // Walk left using Eve's walk animation
-          setWalking(true);
-          const t = Math.min(stateTime / EVE_WALK_DURATION, 1);
-          offsetX = -EVE_WALK_DISTANCE * t;
-          // Walk clip owns the arms here
-          if (t >= 1) {
-            eveState = "turnLeftToRight";
-            stateStartTime = now;
-          }
-          rotationY = EVE_FACE_Y;
-          break;
-        }
-
-        case "turnLeftToRight":
-          // At left spot, face camera, arms forward + wave
-          setWalking(false);
-          offsetX = -EVE_WALK_DISTANCE;
-          rotationY = EVE_FACE_CAMERA_Y;
-          setArmsWaveForward(now);
-          if (stateTime > EVE_TURN_WAVE_DURATION) {
-            eveState = "waveAway";
-            stateStartTime = now;
-          }
-          break;
-
-        case "waveAway":
-          // At left spot, turned around (facing right), side-wave
-          setWalking(false);
-          rotationY = EVE_FACE_Y + Math.PI;
-          offsetX = -EVE_WALK_DISTANCE;
-          setArmsWaveSide(now);
-          if (stateTime > EVE_WAVE_DURATION) {
-            eveState = "walkRight";
-            stateStartTime = now;
-          }
-          break;
-
-        case "walkRight": {
-          // Walk back to original spot
-          setWalking(true);
-          const t = Math.min(stateTime / EVE_WALK_DURATION, 1);
-          offsetX = -EVE_WALK_DISTANCE * (1 - t);
-          rotationY = EVE_FACE_Y + Math.PI;
-          if (t >= 1) {
-            eveState = "turnRightToLeft";
-            stateStartTime = now;
-          }
-          break;
-        }
-
-        case "turnRightToLeft":
-          // At home spot, face camera, arms forward + wave
-          setWalking(false);
-          offsetX = 0;
-          rotationY = EVE_FACE_CAMERA_Y;
-          setArmsWaveForward(now);
-          if (stateTime > EVE_TURN_WAVE_DURATION) {
-            eveState = "waveHome";
-            stateStartTime = now;
-          }
-          break;
+      if (!hasHomePosition) {
+        evePosX = basePosX;
+        evePosY = basePosY;
+        hasHomePosition = true;
+        eveRoot.position.set(evePosX, evePosY, EVE_Z);
+        eveRoot.rotation.y = EVE_FACE_Y;
+        eveUserFacingY = EVE_FACE_Y;
       }
 
-      eveRoot.position.set(basePosX + offsetX, basePosY, EVE_Z);
-      eveRoot.rotation.y = rotationY;
+      if (eveMode === "user") {
+        // If idle in user mode for too long, start auto-return
+        if (now - lastUserInputTime > EVE_USER_IDLE_TIMEOUT_MS) {
+          startReturnHome(now);
+        } else {
+          runUserControl(now, deltaSec);
+        }
+      } else if (eveMode === "returning") {
+        runReturnHome(now);
+      } else {
+        // Normal scripted behavior
+        runScripted(now);
+      }
     }
 
     renderer.render(scene, camera);
