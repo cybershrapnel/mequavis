@@ -4,6 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MEQUAVIS UI</title>
+
+<script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+
+
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { background:black; color:white; font-family:monospace; overflow:hidden; }
@@ -451,7 +463,10 @@ window.addEventListener("resize", updateCanvasScale);
 const center = {x: W/2, y: H/2};
 let compact = false;
 
-let nofurs = [];            // list of nofurs for click hits
+//let nofurs = [];            // list of nofurs for click hits
+window.nofurs = [];
+let nofurs = window.nofurs; // keep the rest of your code using "nofurs"
+
 let seekerPositions = [];   // seeker nodes for omega-linking
 let omniverseAddress = "";  // accumulated address string, grows by 1 digit per click
 
@@ -1216,7 +1231,10 @@ let rot=0;
 function animate(){
   ctx.clearRect(0,0,W,H);
   seekerPositions = [];
-  nofurs = [];            // reset nofurs each frame
+  //nofurs = [];            // reset nofurs each frame
+nofurs = [];
+window.nofurs = nofurs;
+
   rot+=0.01;
   drawTitle();
   drawSierpinskiBox();
@@ -1323,6 +1341,12 @@ document.getElementById("layoutBtn").addEventListener("click",()=>{ compact = !c
 
 
 
+</script>
+
+
+<script type="module" src="meq-eve-overlay.js"></script>
+<script>
+  window.EVE_SCALE = 130;   // try 40, 80, 150, 300
 </script>
 
 </body>
