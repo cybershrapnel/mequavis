@@ -96,6 +96,15 @@
     ">
       <span>AI CABLE TV • YouTube Playlist</span>
       <div style="display:flex; gap:4px;">
+        <button id="tvPanelView" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">View Videos</button>
         <button id="tvPanelNext" style="
           background:#111;
           color:#0ff;
@@ -138,15 +147,17 @@
 
   document.body.appendChild(panel);
 
-  const headerEl    = panel.querySelector("#tvPanelHeader");
-  const closeBtn    = panel.querySelector("#tvPanelClose");
-  const nextBtn     = panel.querySelector("#tvPanelNext");
-  const popoutBtn   = panel.querySelector("#tvPanelPopout");
+  const headerEl          = panel.querySelector("#tvPanelHeader");
+  const closeBtn          = panel.querySelector("#tvPanelClose");
+  const nextBtn           = panel.querySelector("#tvPanelNext");
+  const popoutBtn         = panel.querySelector("#tvPanelPopout");
+  const viewBtn           = panel.querySelector("#tvPanelView");
   const playerContainerId = "tvPlayerContainer";
 
   // 3) YouTube IFrame API loader & player
   let player = null;
   let ytApiLoading = false;
+  let isExternalViewActive = false; // ← new flag
 
   function ensureYouTubeAPI(callback) {
     if (window.YT && typeof YT.Player === "function") {
@@ -246,6 +257,27 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 3.25) VIEW VIDEOS (load external site into the div)
+  // ---------------------------------------------------------------------------
+  function loadExternalVideoSite() {
+    // Kill the YouTube player if active
+    destroyPlayer();
+
+    const container = document.getElementById(playerContainerId);
+    if (!container) return;
+
+    container.innerHTML = `
+      <iframe
+        src="https://xtdevelopment.net/mtv/"
+        style="width:100%; height:100%; border:none;"
+        loading="lazy"
+      ></iframe>
+    `;
+
+    isExternalViewActive = true; // mark that we're in external mode
+  }
+
+  // ---------------------------------------------------------------------------
   // 3.5) POPOUT + DRAG LOGIC
   // ---------------------------------------------------------------------------
   let isDragging = false;
@@ -302,12 +334,18 @@
     panel.style.right  = "auto";
     panel.style.bottom = "auto";
     panel.style.width  = newWidth + "px";
-    panel.style.height = newHeight+100 + "px";
+    panel.style.height = newHeight + 100 + "px";
 
     // 🔹 Remove the Popout button after use
     if (popoutBtn) {
       popoutBtn.style.display = "none";
       popoutBtn.disabled = true;
+    }
+
+    // 🔹 Also remove the View Videos button after popout
+    if (viewBtn) {
+      viewBtn.style.display = "none";
+      viewBtn.disabled = true;
     }
   }
 
@@ -327,11 +365,18 @@
     panel.style.width  = "";
     panel.style.height = "";
     poppedOut = false;
+    isExternalViewActive = false;
 
     // Restore Popout button on fresh open
     if (popoutBtn) {
       popoutBtn.style.display = "inline-block";
       popoutBtn.disabled = false;
+    }
+
+    // Restore View Videos button on fresh open
+    if (viewBtn) {
+      viewBtn.style.display = "inline-block";
+      viewBtn.disabled = false;
     }
 
     // use flex so header + player container layout nicely
@@ -348,6 +393,7 @@
   function closePanel() {
     panel.style.display = "none";
     destroyPlayer();
+    isExternalViewActive = false;
   }
 
   // 5) Wire up button toggling
@@ -365,7 +411,28 @@
 
   if (nextBtn) {
     nextBtn.addEventListener("click", () => {
-      playNextVideo();
+      // If we're currently showing the external site, NEXT should restore YouTube
+      if (isExternalViewActive) {
+        const container = document.getElementById(playerContainerId);
+        if (container) {
+          container.innerHTML = ""; // remove iframe
+        }
+        isExternalViewActive = false;
+
+        ensureYouTubeAPI(() => {
+          // You can optionally reshuffle here; createPlayer() already picks a random starting video
+          createPlayer();
+        });
+      } else {
+        // Normal behavior: go to next YouTube video
+        playNextVideo();
+      }
+    });
+  }
+
+  if (viewBtn) {
+    viewBtn.addEventListener("click", () => {
+      loadExternalVideoSite();
     });
   }
 
