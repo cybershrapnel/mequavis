@@ -1,20 +1,13 @@
 // meq-tone-engine.js
 // Seeker Tone Engine
 //
-// - Lives in #segmentLog, BEFORE the Segments section.
+// - Lives in #segmentLog, BEFORE the Segments header.
 // - Uses the 7 seeker color swatches to generate tones:
 //     * Any swatch color change → short tone (if tones enabled).
 //     * Swatch #5 ALSO drives a constant beat whose tempo is adjustable.
 // - Color → frequency mapping:
 //     * Color -> RGB -> HSL -> Hue (0..1)
 //     * freq = baseFreq * 2^(hue * rangeOctaves)
-// - UI:
-//     * Base Frequency (Hz)
-//     * Range (Octaves)
-//     * Tone Duration
-//     * Volume
-//     * Beat Tempo (BPM) using swatch #5
-//     * Play Tones / Disable Tones button
 
 (function () {
   if (window._meqToneEngineInitialized) return;
@@ -37,6 +30,9 @@
 
   // Last seen swatch colors (7)
   let lastColors = new Array(7).fill(null);
+
+  // Tone panel node
+  let tonePanelEl = null;
 
   // ---------------------------------------------------------------------------
   // AUDIO HELPERS
@@ -123,10 +119,9 @@
     const rgb = parseColorToRGB(colorStr);
     if (!rgb) return baseFreq;
 
-    const { h } = rgbToHsl(rgb.r, rgb.g, rgb.b); // 0..1
+    const { h } = rgbToHsl(rgb.r, rgb.g, rgb.b);
     const hueNorm = isNaN(h) ? 0 : h;
 
-    // Spiral/octave mapping
     return baseFreq * Math.pow(2, hueNorm * rangeOctaves);
   }
 
@@ -191,7 +186,6 @@
       const now = current[i];
       const prev = lastColors[i];
       if (now !== prev && now) {
-        // Color changed to a non-null color → tone
         playToneForColor(now);
       }
     }
@@ -219,7 +213,7 @@
 
     beatTimer = setInterval(() => {
       const current = getCurrentSwatchColors();
-      const sw5 = current[4]; // index 4 = swatch #5
+      const sw5 = current[4];
       if (sw5) {
         playToneForColor(sw5);
       }
@@ -232,115 +226,100 @@
 
   function buildTonePanel() {
     const panel = document.getElementById("segmentLog");
-    if (!panel) return;
+    if (!panel || tonePanelEl) return;
 
-    let tonePanel = document.getElementById("tonePanel");
-    if (!tonePanel) {
-      tonePanel = document.createElement("div");
-      tonePanel.id = "tonePanel";
-      tonePanel.style.marginTop = "6px";
-      tonePanel.style.borderTop = "1px solid #222";
-      tonePanel.style.paddingTop = "6px";
-      tonePanel.style.fontSize = "11px";
-      tonePanel.style.color = "#0ff";
+    tonePanelEl = document.createElement("div");
+    tonePanelEl.id = "tonePanel";
+    tonePanelEl.style.marginTop = "6px";
+    tonePanelEl.style.borderTop = "1px solid #222";
+    tonePanelEl.style.paddingTop = "6px";
+    tonePanelEl.style.fontSize = "11px";
+    tonePanelEl.style.color = "#0ff";
 
-      tonePanel.innerHTML = `
-        <h3 style="font-size:11px;color:#0ff;margin:4px 0 4px;">Seeker Tone Engine</h3>
+    tonePanelEl.innerHTML = `
+      <h3 style="font-size:11px;color:#0ff;margin:4px 0 4px;">Seeker Tone Engine</h3>
 
-        <div style="margin-bottom:4px;">
-          <label>Base Frequency:
-            <span id="toneBaseFreqValue">${baseFreq.toFixed(0)} Hz</span>
-          </label><br>
-          <input id="toneBaseFreq" type="range" min="50" max="1000" value="${baseFreq}"
-                 style="width:100%;">
-        </div>
+      <div style="margin-bottom:4px;">
+        <label>Base Frequency:
+          <span id="toneBaseFreqValue">${baseFreq.toFixed(0)} Hz</span>
+        </label><br>
+        <input id="toneBaseFreq" type="range" min="50" max="1000" value="${baseFreq}"
+               style="width:100%;">
+      </div>
 
-        <div style="margin-bottom:4px;">
-          <label>Range (Octaves):
-            <span id="toneRangeValue">${rangeOctaves.toFixed(1)}</span>
-          </label><br>
-          <input id="toneRange" type="range" min="0.5" max="4" step="0.1" value="${rangeOctaves}"
-                 style="width:100%;">
-        </div>
+      <div style="margin-bottom:4px;">
+        <label>Range (Octaves):
+          <span id="toneRangeValue">${rangeOctaves.toFixed(1)}</span>
+        </label><br>
+        <input id="toneRange" type="range" min="0.5" max="4" step="0.1" value="${rangeOctaves}"
+               style="width:100%;">
+      </div>
 
-        <div style="margin-bottom:4px;">
-          <label>Tone Duration:
-            <span id="toneDurationValue">${toneDuration.toFixed(2)} s</span>
-          </label><br>
-          <input id="toneDuration" type="range" min="0.05" max="1" step="0.05" value="${toneDuration}"
-                 style="width:100%;">
-        </div>
+      <div style="margin-bottom:4px;">
+        <label>Tone Duration:
+          <span id="toneDurationValue">${toneDuration.toFixed(2)} s</span>
+        </label><br>
+        <input id="toneDuration" type="range" min="0.05" max="1" step="0.05" value="${toneDuration}"
+               style="width:100%;">
+      </div>
 
-        <div style="margin-bottom:4px;">
-          <label>Volume:
-            <span id="toneVolumeValue">${(volume * 100).toFixed(0)}%</span>
-          </label><br>
-          <input id="toneVolume" type="range" min="0" max="1" step="0.05" value="${volume}"
-                 style="width:100%;">
-        </div>
+      <div style="margin-bottom:4px;">
+        <label>Volume:
+          <span id="toneVolumeValue">${(volume * 100).toFixed(0)}%</span>
+        </label><br>
+        <input id="toneVolume" type="range" min="0" max="1" step="0.05" value="${volume}"
+               style="width:100%;">
+      </div>
 
-        <div style="margin-bottom:6px;">
-          <label>Beat Tempo:
-            <span id="toneTempoValue">${beatBpm.toFixed(0)} BPM</span>
-          </label><br>
-          <input id="toneTempo" type="range" min="40" max="240" value="${beatBpm}"
-                 style="width:100%;">
-        </div>
+      <div style="margin-bottom:6px;">
+        <label>Beat Tempo:
+          <span id="toneTempoValue">${beatBpm.toFixed(0)} BPM</span>
+        </label><br>
+        <input id="toneTempo" type="range" min="40" max="240" value="${beatBpm}"
+               style="width:100%;">
+      </div>
 
-        <button id="toneToggleBtn" style="
-          width:100%;
-          padding:4px;
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          border-radius:3px;
-          cursor:pointer;
-          font-size:11px;
-          font-weight:bold;
-        ">Toggle Tones</button>
-      `;
+      <button id="toneToggleBtn" style="
+        width:100%;
+        padding:4px;
+        background:#111;
+        color:#0ff;
+        border:1px solid #0ff;
+        border-radius:3px;
+        cursor:pointer;
+        font-size:11px;
+        font-weight:bold;
+      ">Enable Tones</button>
+    `;
 
-      // Insert BEFORE "Segments" header so segmentLog rewrite doesn't stomp it.
-      const headers = Array.from(panel.querySelectorAll("h2, h3"));
-      const segmentsHeader = headers.find((h) =>
+    // Insert BEFORE the Segments header if present, else at top
+    const segmentsHeader =
+      panel.querySelector("h2.segment-header") ||
+      Array.from(panel.querySelectorAll("h2, h3")).find(h =>
         /segments/i.test((h.textContent || "").trim())
       );
 
-      if (segmentsHeader && segmentsHeader.parentNode === panel) {
-        panel.insertBefore(tonePanel, segmentsHeader);
-      } else {
-        panel.appendChild(tonePanel);
-      }
-
-      wireTonePanelControls();
+    if (segmentsHeader && segmentsHeader.parentNode === panel) {
+      panel.insertBefore(tonePanelEl, segmentsHeader);
     } else {
-      // Ensure it's still before Segments if DOM got shuffled
-      const headers = Array.from(panel.querySelectorAll("h2, h3"));
-      const segmentsHeader = headers.find((h) =>
-        /segments/i.test((h.textContent || "").trim())
-      );
-      if (
-        segmentsHeader &&
-        segmentsHeader.parentNode === panel &&
-        tonePanel.nextSibling !== segmentsHeader
-      ) {
-        panel.insertBefore(tonePanel, segmentsHeader);
-      }
+      panel.insertBefore(tonePanelEl, panel.firstChild);
     }
+
+    wireTonePanelControls();
   }
 
   function wireTonePanelControls() {
-    const baseSlider = document.getElementById("toneBaseFreq");
-    const baseLabel  = document.getElementById("toneBaseFreqValue");
+    const baseSlider  = document.getElementById("toneBaseFreq");
+    const baseLabel   = document.getElementById("toneBaseFreqValue");
     const rangeSlider = document.getElementById("toneRange");
     const rangeLabel  = document.getElementById("toneRangeValue");
-    const durSlider = document.getElementById("toneDuration");
-    const durLabel  = document.getElementById("toneDurationValue");
-    const volSlider = document.getElementById("toneVolume");
-    const volLabel  = document.getElementById("toneVolumeValue");
+    const durSlider   = document.getElementById("toneDuration");
+    const durLabel    = document.getElementById("toneDurationValue");
+    const volSlider   = document.getElementById("toneVolume");
+    const volLabel    = document.getElementById("toneVolumeValue");
     const tempoSlider = document.getElementById("toneTempo");
     const tempoLabel  = document.getElementById("toneTempoValue");
-    const toggleBtn = document.getElementById("toneToggleBtn");
+    const toggleBtn   = document.getElementById("toneToggleBtn");
 
     if (baseSlider && baseLabel) {
       baseSlider.addEventListener("input", () => {
@@ -395,7 +374,7 @@
         }
 
         tonesEnabled = !tonesEnabled;
-        toggleBtn.textContent = tonesEnabled ? "Toggle Tones" : "Toggle Tones";
+        toggleBtn.textContent = tonesEnabled ? "Disable Tones" : "Enable Tones";
 
         if (!tonesEnabled) {
           stopBeatLoop();
@@ -407,49 +386,33 @@
   }
 
   // ---------------------------------------------------------------------------
-  // INIT / POLLING
+  // INIT
   // ---------------------------------------------------------------------------
 
-  function initTick() {
+  function initToneEngine() {
     const panel = document.getElementById("segmentLog");
-    const seekerContent = document.getElementById("seekerStatusContent");
-    if (!panel || !seekerContent) return;
+    if (!panel) return false;
 
-    // Ensure tone panel is in the right position
     buildTonePanel();
+    lastColors = getCurrentSwatchColors();
 
-    // Swatch change detection
-    handleSwatchChanges();
+    // Poll only the swatches, panel is static now
+    setInterval(handleSwatchChanges, 200);
+
+    console.log("[meq-tone-engine] Seeker Tone Engine initialized.");
+    return true;
   }
 
-  function initWhenReady() {
-    if (document.getElementById("segmentLog")) {
-      // Prime lastColors
-      lastColors = getCurrentSwatchColors();
-
-      // Poll periodically so if Segments rewrites the panel,
-      // we reinsert the tone panel and keep tracking swatches.
-      setInterval(initTick, 200);
-      return true;
-    }
-    return false;
+  function waitForPanel() {
+    if (initToneEngine()) return;
+    const iv = setInterval(() => {
+      if (initToneEngine()) clearInterval(iv);
+    }, 500);
   }
 
   if (document.readyState === "complete" || document.readyState === "interactive") {
-    if (!initWhenReady()) {
-      const iv = setInterval(() => {
-        if (initWhenReady()) clearInterval(iv);
-      }, 500);
-    }
+    waitForPanel();
   } else {
-    document.addEventListener("DOMContentLoaded", () => {
-      if (!initWhenReady()) {
-        const iv = setInterval(() => {
-          if (initWhenReady()) clearInterval(iv);
-        }, 500);
-      }
-    });
+    document.addEventListener("DOMContentLoaded", waitForPanel);
   }
-
-  console.log("[meq-tone-engine] Seeker Tone Engine initialized (before Segments + swatch #5 beat).");
 })();
