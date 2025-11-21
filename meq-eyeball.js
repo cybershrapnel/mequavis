@@ -32,6 +32,10 @@
 //        → when enabled, whenever Eye Link 1 is connected to a SMALL nofur
 //           (flag "left"/"right"), simulate a click on that small nofur,
 //           BUT never twice in a row on the same one (by label+flag+baseDigit).
+//      [Stop Big Wheel Spin] / [Start Big Wheel Spin]
+//        → global toggle: window._meqBigWheelSpinEnabled (true/false).
+//           Your big-wheel rotation code should respect this and stop rotating
+//           the ALPHA/BETA/GAMMA/DELTA/OMEGA wheels when disabled.
 //
 //  - When eye is disabled:
 //      * No movement, no lines.
@@ -61,6 +65,10 @@
   }
   if (typeof window._meqEyeAutoTraverse === "undefined") {
     window._meqEyeAutoTraverse = false;
+  }
+  // NEW: master toggle for big wheel spin (used by your rotation code)
+  if (typeof window._meqBigWheelSpinEnabled === "undefined") {
+    window._meqBigWheelSpinEnabled = true;
   }
 
   const bigLabels = new Set(["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"]);
@@ -767,6 +775,7 @@
     const enabled = !!window._meqEyeEnabled;
     const follow = !!window._meqEyeFollowMouse;
     const autoTrav = !!window._meqEyeAutoTraverse;
+    const bigSpin = !!window._meqBigWheelSpinEnabled;
     const speedScale = getSpeedScale();
     const status = window._meqEyeballStatus;
 
@@ -888,14 +897,18 @@
       }
     }
 
+    // Auto Eye Traverse + Big Wheel Spin row
     let autoRow = document.getElementById("autoEyeRow");
     if (!autoRow) {
       autoRow = document.createElement("div");
       autoRow.id = "autoEyeRow";
       autoRow.style.marginTop = "4px";
+      autoRow.style.display = "flex";
+      autoRow.style.gap = "4px";
 
       const autoBtn = document.createElement("button");
       autoBtn.id = "autoEyeBtn";
+      autoBtn.style.flex = "1 1 auto";
       autoBtn.style.padding = "3px 6px";
       autoBtn.style.fontSize = "10px";
       autoBtn.style.background = "#111";
@@ -908,11 +921,37 @@
       });
 
       autoRow.appendChild(autoBtn);
+
+      // NEW: Big Wheel Spin toggle button, same row
+      const bigSpinBtn = document.createElement("button");
+      bigSpinBtn.id = "bigWheelSpinBtn";
+      bigSpinBtn.style.flex = "1 1 auto";
+      bigSpinBtn.style.padding = "3px 6px";
+      bigSpinBtn.style.fontSize = "10px";
+      bigSpinBtn.style.background = "#111";
+      bigSpinBtn.style.color = "#0f0";
+      bigSpinBtn.style.border = "1px solid #0f0";
+      bigSpinBtn.style.borderRadius = "3px";
+      bigSpinBtn.style.cursor = "pointer";
+      bigSpinBtn.addEventListener("click", function () {
+        window._meqBigWheelSpinEnabled = !window._meqBigWheelSpinEnabled;
+      });
+
+      autoRow.appendChild(bigSpinBtn);
+
       container.appendChild(autoRow);
     }
+
     const autoBtn = document.getElementById("autoEyeBtn");
     if (autoBtn) {
       autoBtn.textContent = autoTrav ? "Stop Auto Traverse" : "Auto Eye Traverse";
+    }
+
+    const bigSpinBtn = document.getElementById("bigWheelSpinBtn");
+    if (bigSpinBtn) {
+      bigSpinBtn.textContent = bigSpin ? "Stop Nofur Spin" : "Start Nofur Spin";
+      bigSpinBtn.style.color = bigSpin ? "#f00" : "#0f0";
+      bigSpinBtn.style.borderColor = bigSpin ? "#f00" : "#0f0";
     }
 
     function currentOuterIndexFor(label) {
@@ -1111,6 +1150,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse with no repeated small nofur)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse with no repeated small nofur + big wheel spin toggle)."
   );
 })();
