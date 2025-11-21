@@ -535,61 +535,85 @@
     lastTraverseNodeKey = key;
   }
 
-  // NEW: when eye is DISABLED but Auto Traverse is ON,
-  // randomly pick a small nofur every 20–200ms and keep a line
-  // drawn to the last picked one until the next pick.
-  function updateDisabledAutoTraverse(timestamp) {
-    if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
-      disabledTraverseTarget = null;
-      disabledTraverseInterval = 0;
-      disabledTraverseLastSwitchTime = 0;
-      return;
-    }
-
-    // Grab nofurs
-    let nodes = [];
-    if (Array.isArray(window.nofurs)) {
-      nodes = window.nofurs;
-    } else if (typeof nofurs !== "undefined" && Array.isArray(nofurs)) {
-      nodes = nofurs;
-    }
-
-    const smalls = nodes.filter(
-      (n) =>
-        n &&
-        n.center &&
-        (n.flag === "left" || n.flag === "right")
-    );
-
-    if (!smalls.length) {
-      disabledTraverseTarget = null;
-      return;
-    }
-
-    // Initialize on first run
-    if (!disabledTraverseTarget) {
-      const idx = Math.floor(Math.random() * smalls.length);
-      disabledTraverseTarget = smalls[idx];
-      disabledTraverseInterval = 20 + Math.random() * 180; // 20–200 ms
-      disabledTraverseLastSwitchTime = timestamp;
-      return;
-    }
-
-    if (!disabledTraverseInterval) {
-      disabledTraverseInterval = 20 + Math.random() * 180;
-    }
-    if (!disabledTraverseLastSwitchTime) {
-      disabledTraverseLastSwitchTime = timestamp;
-    }
-
-    const elapsed = timestamp - disabledTraverseLastSwitchTime;
-    if (elapsed >= disabledTraverseInterval) {
-      const idx = Math.floor(Math.random() * smalls.length);
-      disabledTraverseTarget = smalls[idx];
-      disabledTraverseInterval = 20 + Math.random() * 180; // next random interval
-      disabledTraverseLastSwitchTime = timestamp;
-    }
+ // NEW: when eye is DISABLED but Auto Traverse is ON,
+// randomly pick a small nofur every (scaled) interval
+// and keep a line drawn to the last picked one until the next pick.
+function updateDisabledAutoTraverse(timestamp) {
+  if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
+    disabledTraverseTarget = null;
+    disabledTraverseInterval = 0;
+    disabledTraverseLastSwitchTime = 0;
+    return;
   }
+
+  // Grab nofurs
+  let nodes = [];
+  if (Array.isArray(window.nofurs)) {
+    nodes = window.nofurs;
+  } else if (typeof nofurs !== "undefined" && Array.isArray(nofurs)) {
+    nodes = nofurs;
+  }
+
+  const smalls = nodes.filter(
+    (n) =>
+      n &&
+      n.center &&
+      (n.flag === "left" || n.flag === "right")
+  );
+
+  if (!smalls.length) {
+    disabledTraverseTarget = null;
+    return;
+  }
+
+  // 🔹 Helper: compute interval (ms) scaled by Eye Speed slider
+  // Slider is 0..100, baseline is at 10.
+  // At 10 → factor 1 → 20–200ms (current behavior)
+  // Below 10 → factor >1 → slower
+  // Above 10 → factor <1 → faster
+function computeInterval() {
+  const speedValRaw = getSpeedScale();   // 0..100 from slider
+  // 🔹 If slider is at 0, treat it as 0.25 instead so it doesn't bug out
+  const speedVal = speedValRaw <= 0 ? 0.25 : speedValRaw;
+
+  const baselineMin = 20;   // ms
+  const baselineMax = 200;  // ms
+  const base = baselineMin + Math.random() * (baselineMax - baselineMin);
+
+  // At 10 → factor 1 → 20–200ms (baseline)
+  // Below 10 → factor >1 → slower
+  // Above 10 → factor <1 → faster
+  const multiplier = 10 / speedVal;
+
+  return base * multiplier;
+}
+
+
+  // Initialize on first run
+  if (!disabledTraverseTarget) {
+    const idx = Math.floor(Math.random() * smalls.length);
+    disabledTraverseTarget = smalls[idx];
+    disabledTraverseInterval = computeInterval();
+    disabledTraverseLastSwitchTime = timestamp;
+    return;
+  }
+
+  if (!disabledTraverseInterval) {
+    disabledTraverseInterval = computeInterval();
+  }
+  if (!disabledTraverseLastSwitchTime) {
+    disabledTraverseLastSwitchTime = timestamp;
+  }
+
+  const elapsed = timestamp - disabledTraverseLastSwitchTime;
+  if (elapsed >= disabledTraverseInterval) {
+    const idx = Math.floor(Math.random() * smalls.length);
+    disabledTraverseTarget = smalls[idx];
+    disabledTraverseInterval = computeInterval(); // next scaled interval
+    disabledTraverseLastSwitchTime = timestamp;
+  }
+}
+
 
   function drawEyeballAndLink() {
     try {
