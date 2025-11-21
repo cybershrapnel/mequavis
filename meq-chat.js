@@ -28,6 +28,69 @@ window.MeqChat = (function () {
   };
 
   // ---------------------------------------------------------------------------
+  // EVE SPEECH CONTROL FROM CHAT
+  // ---------------------------------------------------------------------------
+  // Track which text we last sent to Eve's TTS
+  let lastEveSpeechText = null;
+
+  function playEveForText(text) {
+    if (!text) return;
+    const trimmed = String(text).trim();
+    if (!trimmed) return;
+
+    if (!window.meqEveOverlay || typeof window.meqEveOverlay.setSpeechText !== "function") {
+      console.warn("Eve overlay not ready for speech.");
+      return;
+    }
+
+    const overlay = window.meqEveOverlay;
+    const isSpeaking = !!overlay.isSpeaking; // boolean getter
+
+    const sameAsLast = (lastEveSpeechText === trimmed);
+
+    // If same text and currently speaking → toggle OFF
+    if (sameAsLast && isSpeaking) {
+      if (typeof overlay.stopSpeech === "function") {
+        overlay.stopSpeech();
+      }
+      return;
+    }
+
+    // New text (or same text but not speaking) → speak this line
+    overlay.setSpeechText(trimmed);
+
+    if (typeof overlay.speak === "function") {
+      overlay.speak();
+    } else {
+      // Fallback: simulate pressing "t" (uses the keyboard handler)
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
+    }
+
+    lastEveSpeechText = trimmed;
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      // Fallback for older browsers
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (err) {
+      console.warn("Copy failed:", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // MODEL HANDLING
   // ---------------------------------------------------------------------------
   function getCurrentModel() {
@@ -61,6 +124,17 @@ window.MeqChat = (function () {
       label = `Gemini (${model})`;
     } else {
       label = provider.toUpperCase();
+    }
+
+    // Inject AI reply into Eve's speech text by default
+    try {
+      if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
+        window.meqEveOverlay.setSpeechText(reply);
+      } else {
+        window.EVE_SPEECH_TEXT = reply;
+      }
+    } catch (e) {
+      console.warn("Failed to set Eve speech text:", e);
     }
 
     streamAIReply(label, reply);
@@ -136,66 +210,90 @@ window.MeqChat = (function () {
     if (s.startsWith("openai ")) return true;
     if (s.startsWith("gemini ")) return true;
     if (s.indexOf("fake api reply") !== -1) return true;
-  if (s === "eve") return true;
+    if (s === "eve") return true;
     return false;
   }
 
   // Apply "Hide User Chat" filter to messages
-function applyUserChatFilter() {
-  if (!aiOutputEl) return;
-  const hide = !!filters.hideUserChat;
-  const msgs = aiOutputEl.querySelectorAll(".msg.msg-user");
-  msgs.forEach(m => {
-    m.style.display = hide ? "none" : "";
-  });
-}
-
-
+  function applyUserChatFilter() {
+    if (!aiOutputEl) return;
+    const hide = !!filters.hideUserChat;
+    const msgs = aiOutputEl.querySelectorAll(".msg.msg-user");
+    msgs.forEach(m => {
+      m.style.display = hide ? "none" : "";
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // APPEND A FULLY-FORMATTED MESSAGE (USED FOR HISTORY + NON-STREAMED)
   // ---------------------------------------------------------------------------
-function appendFormattedMessage(sender, text) {
-  if (!aiOutputEl) return;
+  function appendFormattedMessage(sender, text) {
+    if (!aiOutputEl) return;
 
-  const msgDiv = document.createElement("div");
-  msgDiv.className = "msg";
+    const msgDiv = document.createElement("div");
+    msgDiv.className = "msg";
 
-  // Classify message:
-  // - AI / model → msg-ai
-  // - "You" (main prompt) → msg-self (never hidden)
-  // - "System" → msg-system (never hidden)
-  // - Anything else (room usernames) → msg-user (Hide User Chat affects these)
-  if (isAISender(sender)) {
-    msgDiv.classList.add("msg-ai");
-  } else if (sender === "You" || sender === "User Query") {
-    msgDiv.classList.add("msg-self");
-  } else if (sender === "System") {
-    msgDiv.classList.add("msg-system");
-  } else {
-    msgDiv.classList.add("msg-user");
+    // Classify message:
+    // - AI / model → msg-ai
+    // - "You" (main prompt) → msg-self (never hidden)
+    // - "System" → msg-system (never hidden)
+    // - Anything else (room usernames) → msg-user (Hide User Chat affects these)
+    if (isAISender(sender)) {
+      msgDiv.classList.add("msg-ai");
+    } else if (sender === "You" || sender === "User Query") {
+      msgDiv.classList.add("msg-self");
+    } else if (sender === "System") {
+      msgDiv.classList.add("msg-system");
+    } else {
+      msgDiv.classList.add("msg-user");
+    }
+
+    const senderSpan = document.createElement("span");
+    senderSpan.className = "sender";
+    senderSpan.textContent = sender + ": ";
+
+    const contentSpan = document.createElement("span");
+    contentSpan.className = "streamed-text";
+    contentSpan.innerHTML = formatStreamText(text);
+
+    // Optional controls for AI messages
+    let playBtn = null;
+    let copyBtn = null;
+
+    if (isAISender(sender)) {
+      // 🔊 Play button
+      playBtn = document.createElement("button");
+      playBtn.className = "msg-play-btn";
+      playBtn.title = "Make Eve say this";
+      playBtn.textContent = "▶";
+      playBtn.addEventListener("click", () => {
+        playEveForText(text);
+      });
+
+      // 📋 Clipboard button
+      copyBtn = document.createElement("button");
+      copyBtn.className = "msg-copy-btn";
+      copyBtn.title = "Copy response to clipboard";
+      copyBtn.textContent = "📋";
+      copyBtn.addEventListener("click", () => {
+        copyToClipboard(text);
+      });
+    }
+
+    // Build layout: [play] [sender] [content] [clipboard]
+    if (playBtn) msgDiv.appendChild(playBtn);
+    msgDiv.appendChild(senderSpan);
+    msgDiv.appendChild(contentSpan);
+    if (copyBtn) msgDiv.appendChild(copyBtn);
+
+    aiOutputEl.appendChild(msgDiv);
+
+    const scrollEl = rightMiddleEl || aiOutputEl.parentElement || aiOutputEl;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+
+    // This only hides .msg-user, not .msg-self or .msg-system
+    applyUserChatFilter();
   }
-
-  const senderSpan = document.createElement("span");
-  senderSpan.className = "sender";
-  senderSpan.textContent = sender + ": ";
-
-  const contentSpan = document.createElement("span");
-  contentSpan.className = "streamed-text";
-  contentSpan.innerHTML = formatStreamText(text);
-
-  msgDiv.appendChild(senderSpan);
-  msgDiv.appendChild(contentSpan);
-  aiOutputEl.appendChild(msgDiv);
-
-  const scrollEl = rightMiddleEl || aiOutputEl.parentElement || aiOutputEl;
-  scrollEl.scrollTop = scrollEl.scrollHeight;
-
-  // This only hides .msg-user, not .msg-self or .msg-system
-  applyUserChatFilter();
-}
-
-
 
   // ---------------------------------------------------------------------------
   // STREAMING / CHUNKED OUTPUT (WORD/TOKEN-BASED) + AUTO-SCROLL
@@ -218,8 +316,30 @@ function appendFormattedMessage(sender, text) {
     const contentSpan = document.createElement("span");
     contentSpan.className = "streamed-text";
 
+    // 🔊 Play button (uses fullText)
+    const playBtn = document.createElement("button");
+    playBtn.className = "msg-play-btn";
+    playBtn.title = "Make Eve say this";
+    playBtn.textContent = "▶";
+    playBtn.addEventListener("click", () => {
+      playEveForText(fullText);
+    });
+
+    // 📋 Clipboard button
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "msg-copy-btn";
+    copyBtn.title = "Copy response to clipboard";
+    copyBtn.textContent = "📋";
+    copyBtn.addEventListener("click", () => {
+      copyToClipboard(fullText);
+    });
+
+    // Layout: [play] [sender] [content] [clipboard]
+    msgDiv.appendChild(playBtn);
     msgDiv.appendChild(senderSpan);
     msgDiv.appendChild(contentSpan);
+    msgDiv.appendChild(copyBtn);
+
     aiOutputEl.appendChild(msgDiv);
 
     const scrollEl = rightMiddleEl || aiOutputEl.parentElement || aiOutputEl;
@@ -874,6 +994,28 @@ function appendFormattedMessage(sender, text) {
         font-family: monospace;
         font-size: 11px;
       }
+
+      /* Play & copy buttons */
+      #aiOutput .msg-play-btn,
+      #aiOutput .msg-copy-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 11px;
+        padding: 0 3px;
+      }
+      #aiOutput .msg-play-btn {
+        color: #0f0; /* small green arrow */
+        margin-right: 4px;
+      }
+      #aiOutput .msg-copy-btn {
+        color: #0ff;
+        margin-left: 4px;
+      }
+      #aiOutput .msg-play-btn:hover,
+      #aiOutput .msg-copy-btn:hover {
+        filter: brightness(1.4);
+      }
     `;
     document.head.appendChild(style);
 
@@ -894,9 +1036,6 @@ function appendFormattedMessage(sender, text) {
       }
     });
   }
-
-
-
 
   // ---------------------------------------------------------------------------
   // INIT
