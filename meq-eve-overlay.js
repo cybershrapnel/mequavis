@@ -134,6 +134,9 @@ if (canvas) {
   let isJumping = false;
   let jumpVelocity = 0;
 
+  // Eve scale factor (user adjustable)
+  let eveScaleFactor = 1.0;
+
   // Modes:
   // "script"    -> original scripted behavior (wave/walk/turn)
   // "user"      -> keyboard control via arrow keys + space
@@ -205,6 +208,20 @@ if (canvas) {
   }
 
   // ---------------------------
+  // Scale helpers
+  // ---------------------------
+  function applyEveScale() {
+    if (!eveRoot) return;
+    eveRoot.scale.setScalar(EVE_SCALE * eveScaleFactor);
+  }
+
+  function adjustEveScale(delta) {
+    // Clamp to keep things sane (no inversion / infinite tiny)
+    eveScaleFactor = Math.max(0.1, Math.min(10, eveScaleFactor + delta));
+    applyEveScale();
+  }
+
+  // ---------------------------
   // Load GLB model
   // ---------------------------
   const loader = new GLTFLoader();
@@ -215,6 +232,9 @@ if (canvas) {
     (gltf) => {
       console.log("meq-eve-overlay.js: Eve GLB loaded:", gltf);
       eveRoot = gltf.scene;
+// Expose eveRoot globally so helper scripts (like mouth controller) can find her
+window.meqEveOverlay = window.meqEveOverlay || {};
+window.meqEveOverlay.eveRoot = eveRoot;
 
       eveRoot.traverse((child) => {
         if (child.isMesh) {
@@ -226,7 +246,7 @@ if (canvas) {
         }
       });
 
-      eveRoot.scale.setScalar(EVE_SCALE);
+      applyEveScale(); // initial scale using factor
       eveRoot.position.set(0, -100, EVE_Z);
 
       // Face left (toward the wheel)
@@ -237,6 +257,10 @@ if (canvas) {
       // --- Animation mixer & walk clip ---
       if (gltf.animations && gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(eveRoot);
+  // expose mixer for mouth script
+  window.meqEveOverlay = window.meqEveOverlay || {};
+  window.meqEveOverlay.mixer = mixer;
+
         const index = Math.min(
           Math.max(0, EVE_WALK_CLIP_INDEX | 0),
           gltf.animations.length - 1
@@ -457,8 +481,11 @@ if (canvas) {
       return;
     }
 
-    // Only care about arrow keys + space + PageUp/PageDown outside of text inputs
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "PageUp", "PageDown"].includes(key) || e.code === "Space") {
+    // Only care about arrow keys + space + PageUp/PageDown + +/- outside of text inputs
+    if (
+      ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "PageUp", "PageDown", "-", "=", "+"].includes(key) ||
+      e.code === "Space"
+    ) {
       e.preventDefault();
     }
 
@@ -498,6 +525,7 @@ if (canvas) {
         markUserInput();
         break;
 
+      // Jump
       case " ":
       case "Spacebar":
         markUserInput();
@@ -506,6 +534,20 @@ if (canvas) {
           eveJumpOffset = 0;
           jumpVelocity = EVE_JUMP_SPEED;
         }
+        break;
+
+      // Scale smaller
+      case "-":
+      case "_":
+        markUserInput();
+        adjustEveScale(-0.01);
+        break;
+
+      // Scale larger
+      case "=":
+      case "+":
+        markUserInput();
+        adjustEveScale(0.01);
         break;
     }
   }
