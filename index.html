@@ -262,35 +262,33 @@ canvas {
 
 
 <!-- MANDELBROT PANEL (hidden by default) -->
-<div id="mandelPanel" style="
-  display:none;
-  position:fixed;
-  left:280px;
-  right:280px;
-  top:70px;
-  bottom:20px;
-  background:#000;
-  border:1px solid #0ff;
-  z-index:999;
-  padding:8px;
-  box-sizing:border-box;
-">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+<div id="mandelPanel" style="display:none; ...">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; margin-left:100px;">
     <span style="color:#0ff; font-family:monospace; font-size:12px;">
       MANDELBROT ZOOM • driven by Segment Addresses
     </span>
-    <button id="mandelClose" style="
-      background:#111;
-      color:#0ff;
-      border:1px solid #0ff;
-      font-family:monospace;
-      font-size:11px;
-      padding:2px 8px;
-      cursor:pointer;
-    ">CLOSE</button>
+    <button
+      id="mandelClose"
+      style="
+        background:#111;
+margin-top:8px;
+margin-right:8px;
+        color:#0ff;
+        border:2px solid #0ff;
+        padding:6px 14px;
+        border-radius:6px;
+        cursor:pointer;
+        font-family:monospace;
+      "
+    >
+      CLOSE
+    </button>
   </div>
-  <canvas id="mandelCanvas" width="800" height="800" style="width:100%; height:calc(100% - 24px); background:#000;"></canvas>
+  <canvas id="mandelCanvas" width="800" height="800"
+          style="width:70%; height:800px; background:#000;"></canvas>
 </div>
+
+
 
 
 
@@ -481,130 +479,6 @@ let segmentHistory = [];
 
 
 
-// === MANDELBROT STATE ===
-let mandelPanel   = null;
-let mandelCanvas  = null;
-let mandelCtx     = null;
-let mandelCenterX = -0.75;   // standard Mandelbrot center
-let mandelCenterY = 0.0;
-let mandelScale   = 3.0;     // width of the visible region in the complex plane
-let mandelZoomLevel = 0;
-let mandelInitialized = false;
-
-// Initialize references once
-function initMandel() {
-  if (mandelInitialized) return;
-  mandelPanel  = document.getElementById("mandelPanel");
-  mandelCanvas = document.getElementById("mandelCanvas");
-  mandelCtx    = mandelCanvas.getContext("2d");
-
-  const closeBtn = document.getElementById("mandelClose");
-  if (closeBtn && mandelPanel) {
-    closeBtn.addEventListener("click", () => {
-      mandelPanel.style.display = "none";
-    });
-  }
-
-  mandelInitialized = true;
-}
-
-// Show panel + redraw current view
-function showMandelPanel() {
-  initMandel();
-  if (!mandelPanel) return;
-  mandelPanel.style.display = "block";
-  drawMandelbrot();
-}
-
-// Map an address string → complex plane center.
-// We treat the address as digits, split into X and Y parts, normalize to [0,1],
-// then map to the usual Mandelbrot window.
-function addressToComplex(addressStr) {
-  const digits = (addressStr || "0").replace(/\D/g, "");
-  const padded = digits.padStart(16, "0").slice(0, 16); // 16 digits
-  const half   = 8;
-  const xStr   = padded.slice(0, half);
-  const yStr   = padded.slice(half);
-
-  const maxX = Math.pow(10, half) - 1;
-  const maxY = maxX;
-
-  const xVal = parseInt(xStr, 10) || 0;
-  const yVal = parseInt(yStr, 10) || 0;
-
-  const nx = xVal / maxX; // 0..1
-  const ny = yVal / maxY; // 0..1
-
-  // Map to Mandelbrot base ranges:
-  // real in [-2, 1], imag in [-1.5, 1.5]
-  const cx = -2 + nx * 3;   // -2 → 1
-  const cy = -1.5 + ny * 3; // -1.5 → 1.5
-
-  return { cx, cy };
-}
-
-// Draw Mandelbrot at (mandelCenterX, mandelCenterY, mandelScale)
-function drawMandelbrot() {
-  if (!mandelCanvas || !mandelCtx) return;
-  const w = mandelCanvas.width;
-  const h = mandelCanvas.height;
-  const img = mandelCtx.createImageData(w, h);
-  const data = img.data;
-
-  const maxIter = 100 + mandelZoomLevel * 10; // more iterations as we zoom
-
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
-      // Map pixel -> complex plane
-      const x0 = mandelCenterX + (px - w / 2) * (mandelScale / w);
-      const y0 = mandelCenterY + (py - h / 2) * (mandelScale / h);
-
-      let x = 0, y = 0;
-      let iter = 0;
-      while (x*x + y*y <= 4 && iter < maxIter) {
-        const xTemp = x*x - y*y + x0;
-        y = 2*x*y + y0;
-        x = xTemp;
-        iter++;
-      }
-
-      const idx = (py * w + px) * 4;
-      if (iter === maxIter) {
-        // In the set: black
-        data[idx]   = 0;
-        data[idx+1] = 0;
-        data[idx+2] = 0;
-      } else {
-        // Simple coloring based on iteration
-        const shade = Math.floor(255 * iter / maxIter);
-        data[idx]   = shade;
-        data[idx+1] = (shade * 2) % 255;
-        data[idx+2] = (shade * 3) % 255;
-      }
-      data[idx+3] = 255;
-    }
-  }
-
-  mandelCtx.putImageData(img, 0, 0);
-}
-
-// Called when a segment finishes (wrap of layers).
-// Uses the full omniverse address to choose a new center and zooms in more.
-function mandelbrotZoomStep(fullAddress) {
-  initMandel();
-
-  // Choose a new center based on the finished segment address
-  const { cx, cy } = addressToComplex(fullAddress);
-  mandelCenterX = cx;
-  mandelCenterY = cy;
-
-  // Zoom in (each segment halves the visible window)
-  mandelZoomLevel++;
-  mandelScale = 3.0 * Math.pow(0.5, mandelZoomLevel);
-
-  drawMandelbrot();
-}
-
 
 
 
@@ -616,16 +490,13 @@ let gasket = 1;
 let gasketPower = 1;
 const GASKET_MAX = 17; // gasket goes 1..18 then wraps
 
-// Render the segment history into the left panel
-// Render the segment history into the left panel without nuking other children
+// Render the segment history into the left panel WITHOUT nuking other children
 function updateSegmentLog() {
   const panel = document.getElementById("segmentLog");
   if (!panel) return;
 
-  // Create header + list container once and then reuse them
+  // Find or create the header once
   let header = panel.querySelector("h2.segment-header");
-  let list   = panel.querySelector(".segment-list");
-
   if (!header) {
     header = document.createElement("h2");
     header.className = "segment-header";
@@ -633,13 +504,15 @@ function updateSegmentLog() {
     panel.appendChild(header);
   }
 
+  // Find or create the list container once
+  let list = panel.querySelector(".segment-list");
   if (!list) {
     list = document.createElement("div");
     list.className = "segment-list";
     panel.appendChild(list);
   }
 
-  // Now only touch the list's innerHTML, not the whole panel
+  // Now we ONLY touch the list's contents
   if (segmentHistory.length === 0) {
     list.innerHTML = `<div class="entry">No segments yet</div>`;
     return;
@@ -652,6 +525,7 @@ function updateSegmentLog() {
      </div>`
   ).join("");
 }
+
 
 
 
@@ -691,7 +565,7 @@ if (dist < n.outerRadius + 10) {
 
 
     // NEW: drive Mandelbrot zoom from this finished segment
-    mandelbrotZoomStep(fullAddress);
+    //mandelbrotZoomStep(fullAddress);
 
 
     segmentHistory.push({
@@ -1357,6 +1231,7 @@ animate();
 
 document.getElementById("layoutBtn").addEventListener("click",()=>{ compact = !compact; });
 </script>
+<script src="meq-mandel.js"></script>
 <script src="meq-eyeball.js"></script>
 <script src="meq-tv-videos.js"></script>
 <script src="meq-chat.js"></script>
