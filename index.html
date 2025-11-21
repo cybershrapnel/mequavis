@@ -434,6 +434,9 @@ const W = canvas.width, H = canvas.height;
 const BASE_W = W;
 const BASE_H = H;
 
+// 🔹 Big wheel spin toggle (default ON)
+window._meqBigWheelSpinEnabled = true;
+
 function updateCanvasScale() {
   const leftPanel  = document.getElementById("segmentLog"); // or your left panel ID
   const rightPanel = document.getElementById("rightPanel"); // your right panel ID
@@ -1002,13 +1005,13 @@ if (isSmall && baseDigit !== null) {
 
     let speed = rot;
     if(!isSmall){
-      if(nf.id === "ALPHA") speed = rot * 0.8;
-      else if(nf.id === "BETA") speed = rot * 0.9;
+      if(nf.id === "ALPHA")      speed = rot * 0.8;
+      else if(nf.id === "BETA")  speed = rot * 0.9;
       else if(nf.id === "OMEGA") speed = rot * 1.0;
       else if(nf.id === "DELTA") speed = rot * 1.1;
       else if(nf.id === "GAMMA") speed = rot * 1.2;
     } else {
-      speed = rot * 0.8;
+      speed = rot * 0.8; // small wheels use their rot param
     }
 
     const spinInner = !(isLeft || isRight);
@@ -1244,15 +1247,30 @@ function drawPyramidStack() {
   ctx.fillText(`Layer ${currentLayer}`, centerX, centerY - 95);
 }
 
-let rot=0;
+// 🔁 Big wheels vs small wheels rotation
+// 🔁 Big wheels vs small wheels rotation
+let rot = 0;        // BIG nofur wheels (ALPHA/BETA/GAMMA/DELTA/OMEGA)
+let smallRot = 0;   // SMALL side nofur wheels
+
 function animate(){
   ctx.clearRect(0,0,W,H);
   seekerPositions = [];
   //nofurs = [];            // reset nofurs each frame
-nofurs = [];
-window.nofurs = nofurs;
+  nofurs = [];
+  window.nofurs = nofurs;
 
-  rot+=0.01;
+  // 👉 Current layer index (same as you use in drawTitle/drawPyramidStack)
+  const currentLayer = (pyramidLayers - activeLayers) + 1; // 1..17
+  const layerSpeed   = 0.01 * currentLayer;                // .01 .. .17
+
+  // ▶ Big wheels only advance when spin is enabled
+  if (window._meqBigWheelSpinEnabled !== false) {
+    rot += layerSpeed;
+  }
+
+  // ▶ Small side wheels always spin
+  smallRot += layerSpeed;
+
   drawTitle();
   drawSierpinskiBox();
   drawPyramidStack();
@@ -1292,9 +1310,12 @@ window.nofurs = nofurs;
   ctx.lineTo(omegaRightTarget.x-25, omegaRightTarget.y);
   ctx.stroke();
 
+  // BIG center wheel uses big-rot
   drawOmniverse(center.x, center.y, rot, 1.0);
-  drawOmniverse(center.x-300, center.y, rot, 0.35, true, true, false);
-  drawOmniverse(center.x+300, center.y, rot, 0.35, true, false, true);
+
+  // SMALL side wheels use their own rotation so they keep going
+  drawOmniverse(center.x-300, center.y, smallRot, 0.35, true, true, false);
+  drawOmniverse(center.x+300, center.y, smallRot, 0.35, true, false, true);
 
   // === Connect each non-OMEGA seeker to nearest OMEGA seeker ===
   const omegaSeekers = seekerPositions.filter(s => s.label === "OMEGA");
@@ -1329,6 +1350,8 @@ window.nofurs = nofurs;
 
   requestAnimationFrame(animate);
 }
+
+
 
 animate();
 
