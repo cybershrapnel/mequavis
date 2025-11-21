@@ -84,6 +84,11 @@
   // Auto-traverse: last small nofur we triggered on (by flag+baseDigit)
   let lastTraverseNodeKey = null;
 
+  // NEW: disabled-eye random traversal state
+  let disabledTraverseTarget = null;
+  let disabledTraverseLastSwitchTime = 0;
+  let disabledTraverseInterval = 0; // ms between picks (20–200)
+
   // Sticky label for Traversal Link when OMEGA is unlocked
   let traversalStickyLabel = null;
 
@@ -331,6 +336,24 @@
     ctx.restore();
   }
 
+  // NEW: get parked/disabled eye anchor position
+  function getDisabledEyeballAnchor() {
+    try {
+      if (typeof center !== "undefined" && center) {
+        return { x: center.x, y: center.y - 225 };
+      } else if (typeof W !== "undefined" && typeof H !== "undefined") {
+        return { x: W / 2, y: H / 2 - 200 };
+      } else if (eyeball) {
+        return { x: eyeball.x, y: eyeball.y };
+      }
+    } catch {
+      if (eyeball) {
+        return { x: eyeball.x, y: eyeball.y };
+      }
+    }
+    return { x: 0, y: 0 };
+  }
+
   function drawEyeballOnly() {
     if (!eyeball) return;
     drawEyeballAt(eyeball.x, eyeball.y);
@@ -338,19 +361,8 @@
 
   function drawEyeballDisabled() {
     if (!eyeball || typeof ctx === "undefined") return;
-    try {
-      if (typeof center !== "undefined") {
-        const sx = center.x;
-        const sy = center.y - 225;
-        drawEyeballAt(sx, sy);
-      } else if (typeof W !== "undefined" && typeof H !== "undefined") {
-        drawEyeballAt(W / 2, H / 2 - 200);
-      } else {
-        drawEyeballAt(eyeball.x, eyeball.y);
-      }
-    } catch {
-      drawEyeballAt(eyeball.x, eyeball.y);
-    }
+    const pos = getDisabledEyeballAnchor();
+    drawEyeballAt(pos.x, pos.y);
   }
 
   function drawSegmentedLine(x1, y1, x2, y2, colors) {
@@ -523,14 +535,99 @@
     lastTraverseNodeKey = key;
   }
 
+  // NEW: when eye is DISABLED but Auto Traverse is ON,
+  // randomly pick a small nofur every 20–200ms and keep a line
+  // drawn to the last picked one until the next pick.
+  function updateDisabledAutoTraverse(timestamp) {
+    if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
+      disabledTraverseTarget = null;
+      disabledTraverseInterval = 0;
+      disabledTraverseLastSwitchTime = 0;
+      return;
+    }
+
+    // Grab nofurs
+    let nodes = [];
+    if (Array.isArray(window.nofurs)) {
+      nodes = window.nofurs;
+    } else if (typeof nofurs !== "undefined" && Array.isArray(nofurs)) {
+      nodes = nofurs;
+    }
+
+    const smalls = nodes.filter(
+      (n) =>
+        n &&
+        n.center &&
+        (n.flag === "left" || n.flag === "right")
+    );
+
+    if (!smalls.length) {
+      disabledTraverseTarget = null;
+      return;
+    }
+
+    // Initialize on first run
+    if (!disabledTraverseTarget) {
+      const idx = Math.floor(Math.random() * smalls.length);
+      disabledTraverseTarget = smalls[idx];
+      disabledTraverseInterval = 20 + Math.random() * 180; // 20–200 ms
+      disabledTraverseLastSwitchTime = timestamp;
+      return;
+    }
+
+    if (!disabledTraverseInterval) {
+      disabledTraverseInterval = 20 + Math.random() * 180;
+    }
+    if (!disabledTraverseLastSwitchTime) {
+      disabledTraverseLastSwitchTime = timestamp;
+    }
+
+    const elapsed = timestamp - disabledTraverseLastSwitchTime;
+    if (elapsed >= disabledTraverseInterval) {
+      const idx = Math.floor(Math.random() * smalls.length);
+      disabledTraverseTarget = smalls[idx];
+      disabledTraverseInterval = 20 + Math.random() * 180; // next random interval
+      disabledTraverseLastSwitchTime = timestamp;
+    }
+  }
+
   function drawEyeballAndLink() {
     try {
       if (typeof ctx === "undefined") return;
       if (!eyeball) return;
 
+      // NEW: Disabled eye but Auto Traverse ON → park the eye,
+      // draw a line to the last random small nofur, and keep it
+      // until the next random pick.
       if (!window._meqEyeEnabled) {
+        const anchor = getDisabledEyeballAnchor();
+
+        if (
+          window._meqEyeAutoTraverse &&
+          disabledTraverseTarget &&
+          disabledTraverseTarget.center
+        ) {
+          const x1 = anchor.x;
+          const y1 = anchor.y;
+          const x2 = disabledTraverseTarget.center.x;
+          const y2 = disabledTraverseTarget.center.y;
+
+          ctx.save();
+          ctx.strokeStyle =
+            disabledTraverseTarget.color || "#0f0";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          ctx.restore();
+
+          // still respect the auto-traverse click semantics
+          maybeAutoTraverse(disabledTraverseTarget);
+        }
+
+        drawEyeballAt(anchor.x, anchor.y);
         window._meqEyeballStatus = null;
-        drawEyeballDisabled();
         return;
       }
 
@@ -1189,10 +1286,13 @@
     content.innerHTML = html;
   }
 
-  function eyeballStep() {
+  function eyeballStep(timestamp) {
     ensureEyeballInit();
     attachMouseListener();
     if (!eyeball) return;
+
+    // Update random disabled traverse timing
+    updateDisabledAutoTraverse(typeof timestamp === "number" ? timestamp : performance.now());
 
     if (window._meqEyeEnabled) {
       if (window._meqEyeFollowMouse) {
@@ -1207,13 +1307,13 @@
   window.requestAnimationFrame = function (callback) {
     const wrapped = function (timestamp) {
       callback(timestamp);
-      eyeballStep();
+      eyeballStep(timestamp);
       renderSeekerStatusDom();
     };
     return originalRAF.call(window, wrapped);
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal)."
   );
 })();
