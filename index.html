@@ -477,6 +477,40 @@ let segmentHistory = [];
 
 
 
+function downloadSegmentLog() {
+  // Build the text contents
+  const lines = [];
+
+  // First line as requested
+  lines.push("Segments");
+
+  // Each segment as text
+  segmentHistory.forEach(entry => {
+    const gasketLabel = entry.power === 1
+      ? `Gasket ${entry.gasket}`
+      : `Gasket ${entry.gasket}^${entry.power}`;
+
+    lines.push(`${gasketLabel}, Seg ${entry.segment}: ${entry.address}`);
+  });
+
+  const text = lines.join("\n");
+
+  // Blob -> download
+  const blob = new Blob([text], { type: "text/plain" });
+  const url  = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "segment-log.txt";
+  document.body.appendChild(a);
+  a.click();
+
+  // Cleanup
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 0);
+}
 
 
 
@@ -495,7 +529,30 @@ function updateSegmentLog() {
   const panel = document.getElementById("segmentLog");
   if (!panel) return;
 
-  // Find or create the header once
+  // Download button (optional, if you already added it)
+  let downloadBtn = panel.querySelector("#downloadSegmentLogBtn");
+  if (!downloadBtn) {
+    downloadBtn = document.createElement("button");
+    downloadBtn.id = "downloadSegmentLogBtn";
+    downloadBtn.textContent = "Download Segment Log";
+    downloadBtn.style.cssText = `
+      width: 100%;
+      margin-bottom: 6px;
+      padding: 6px 4px;
+      border: 1px solid #0ff;
+      background: #111;
+      color: #0ff;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: bold;
+      text-align: center;
+    `;
+    downloadBtn.addEventListener("click", downloadSegmentLog);
+    panel.insertBefore(downloadBtn, panel.firstChild);
+  }
+
+  // Header
   let header = panel.querySelector("h2.segment-header");
   if (!header) {
     header = document.createElement("h2");
@@ -504,7 +561,7 @@ function updateSegmentLog() {
     panel.appendChild(header);
   }
 
-  // Find or create the list container once
+  // List container
   let list = panel.querySelector(".segment-list");
   if (!list) {
     list = document.createElement("div");
@@ -512,19 +569,27 @@ function updateSegmentLog() {
     panel.appendChild(list);
   }
 
-  // Now we ONLY touch the list's contents
   if (segmentHistory.length === 0) {
     list.innerHTML = `<div class="entry">No segments yet</div>`;
     return;
   }
 
-  list.innerHTML = segmentHistory.map(entry =>
-    `<div class="entry">
-       Gasket ${entry.gasket}<sup>${entry.power}</sup>,
-       Seg ${entry.segment}: ${entry.address}
-     </div>`
-  ).join("");
+  list.innerHTML = segmentHistory.map(entry => {
+    const gasketLabel = entry.power === 1
+      ? `Gasket ${entry.gasket}`
+      : `Gasket ${entry.gasket}^${entry.power}`;
+
+    // no more slicing/rotating/patching – just display what we recorded
+    return `
+      <div class="entry">
+        ${gasketLabel}, Seg ${entry.segment}: ${entry.address}
+      </div>
+    `;
+  }).join("");
 }
+
+
+
 
 
 
@@ -536,15 +601,14 @@ updateSegmentLog();
 
 // === CLICK HANDLER ===
 canvas.addEventListener("click", e => {
-const rect = canvas.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
 
-// map from scaled pixels → original 1600x900 coordinates
-const scaleX = canvas.width  / rect.width;
-const scaleY = canvas.height / rect.height;
+  // map from scaled pixels → original 1600x900 coordinates
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
 
-const mouseX = (e.clientX - rect.left) * scaleX;
-const mouseY = (e.clientY - rect.top)  * scaleY;
-
+  const mouseX = (e.clientX - rect.left) * scaleX;
+  const mouseY = (e.clientY - rect.top)  * scaleY;
 
   for (const n of nofurs) {
     if (!n.flag || (n.flag !== "left" && n.flag !== "right")) continue;
@@ -553,61 +617,63 @@ const mouseY = (e.clientY - rect.top)  * scaleY;
     const dy = mouseY - n.center.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-if (dist < n.outerRadius + 10) {
+    if (dist < n.outerRadius + 10) {
 
-  // --- Layer decrement with wrap ---
-  // --- Layer decrement with wrap ---
-  if (activeLayers > 1) {
-    activeLayers--;
-  } else {
-    // We are about to wrap: store the finished segment first
-    const fullAddress = (omniverseAddress === "" ? "0" : omniverseAddress);
+      // digit for this click
+      let digit = null;
 
+      // ✅ First: append digit to current segment’s address
+      if (typeof n.baseDigit === "number") {
+        digit = String(n.baseDigit);
+        omniverseAddress += digit;
 
-    // NEW: drive Mandelbrot zoom from this finished segment
-    //mandelbrotZoomStep(fullAddress);
-
-
-    segmentHistory.push({
-      gasket: gasket,
-      power: gasketPower,
-      segment: segment,
-      address: fullAddress
-    });
-    updateSegmentLog();     // refresh left panel
-
-    // Increment segment, reset layers and address
-    segment++;
-    if (segment > pyramidLayers) {
-      // finished a full 1..17 sweep of the gasket
-      segment = 1;
-      gasket++;
-      if (gasket > GASKET_MAX) {
-        gasket = 1;
-        gasketPower++; // increment the "multiplier" / exponent
+        if (n.address !== undefined) {
+          n.address += digit;
+        }
       }
+
+      // ✅ Then: layer decrement / wrap + segment logging
+      if (activeLayers > 1) {
+        // Still peeling layers off this segment
+        activeLayers--;
+      } else {
+        // We just completed the top layer for this segment – log the *full* address
+        const fullAddress = (omniverseAddress === "" ? "0" : omniverseAddress);
+
+        segmentHistory.push({
+          gasket: gasket,
+          power: gasketPower,
+          segment: segment,
+          address: fullAddress
+        });
+        updateSegmentLog();
+
+        // Remember the last digit as the base for the NEXT segment's "0 state"
+        if (digit !== null) {
+          lastBaseDigit = digit;
+        }
+
+        // Advance segment / gasket / power
+        segment++;
+        if (segment > pyramidLayers) {
+          segment = 1;
+          gasket++;
+          if (gasket > GASKET_MAX) {
+            gasket = 1;
+            gasketPower++;
+          }
+        }
+
+        // Reset for next segment: we start counting fresh
+        activeLayers = pyramidLayers;
+        omniverseAddress = "";
+      }
+
+      break;
     }
-
-    activeLayers = pyramidLayers;
-    omniverseAddress = "";
-  }
-
-
-  // --- Append 1 digit (baseDigit) to address for this click ---
-  if (typeof n.baseDigit === "number") {
-    const digit = String(n.baseDigit);
-    omniverseAddress += digit;
-
-    if (n.address !== undefined) {
-      n.address += digit;
-    }
-  }
-
-  break;
-}
-
   }
 });
+
 
 
 const nodeColors = {
@@ -927,17 +993,30 @@ nofurs.push({
   }
 }
 
-function drawTitle(){
-  ctx.fillStyle="#0ff";
-  ctx.font="24px monospace";
-  ctx.textAlign="center";
+function drawTitle() {
+  ctx.fillStyle = "#0ff";
+  ctx.font = "24px monospace";
+  ctx.textAlign = "center";
 
   const currentLayer = (pyramidLayers - activeLayers) + 1;
 
-  // Show omniverse as full address
-  const addressDisplay = omniverseAddress === "" ? "0" : omniverseAddress;
+  // 🔹 Determine base digit: last digit of previous segment, or "0" if none.
+  let baseDigit = "0";
+  if (segmentHistory.length > 0) {
+    const lastEntry = segmentHistory[segmentHistory.length - 1];
+    const addr = (lastEntry.address || "").toString();
+    if (addr.length > 0) {
+      baseDigit = addr[addr.length - 1];
+    }
+  }
 
-  // Gasket display: first pass = "Gasket 1", next wraps = "Gasket 1^2", etc.
+  // 🔹 Current omniverse address core (digits from this segment so far)
+  const core = omniverseAddress || "";
+
+  // 🔹 Display is always baseDigit prepended
+  const addressDisplay = baseDigit + core;
+
+  // Gasket display: first pass = "Gasket 1", later wraps = "Gasket 1^2", etc.
   const gasketLabel = gasketPower === 1
     ? `Gasket ${gasket}`
     : `Gasket ${gasket}^${gasketPower}`;
@@ -948,6 +1027,7 @@ function drawTitle(){
     50
   );
 }
+
 
 
 
