@@ -3,6 +3,8 @@
 // Now: CALL dials the Omniverse digits (0-9) via simulated canvas clicks,
 // with 0.1s between each digit, max 17 digits.
 // ADDED: DTMF-like dial tones on keypad button presses.
+// ADDED: Auto dial controls (count + interval in ms).
+// ADDED: Upload Dial Log -> read txt file, feed digits directly to nofurs handlers.
 
 (function () {
   // 1) Find the OPEN TOOLKIT button
@@ -32,7 +34,7 @@
     right: 20px;
     bottom: 90px;
     width: 220px;
-    height: 320px;
+    height: 330px;
     background: #111;
     border: 1px solid #0ff;
     border-radius: 6px;
@@ -83,6 +85,43 @@
         white-space:nowrap;
       "></div>
 
+      <!-- Auto dial row -->
+      <div id="autoDialRow" style="
+        display:flex;
+        align-items:center;
+        gap:4px;
+        margin-bottom:4px;
+        font-size:10px;
+      ">
+        <button id="autoDialStart" style="
+          flex:0 0 auto;
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          border-radius:3px;
+          padding:2px 6px;
+          cursor:pointer;
+        ">Auto dial</button>
+        <input id="autoDialCount" type="number" min="0" value="0" style="
+          flex:1 1 0;
+          background:#000;
+          color:#0ff;
+          width:50px;
+          border:1px solid #0ff;
+          border-radius:3px;
+          padding:2px 4px;
+        " placeholder="# dials (0=∞)" />
+        <input id="autoDialInterval" type="number" min="10" value="1000" style="
+          flex:1 1 0;
+          background:#000;
+          color:#0ff;
+          width:100px;
+          border:1px solid #0ff;
+          border-radius:3px;
+          padding:2px 4px;
+        " placeholder="ms" />
+      </div>
+
       <div id="dialerPad" style="
         flex:1 1 auto;
         display:grid;
@@ -90,7 +129,20 @@
         grid-auto-rows: 40px;
         gap:4px;
       "></div>
-
+      <!-- Upload Dial Log row (under CALL) -->
+      <div style="margin-top:4px;">
+        <button id="uploadDialLog" style="
+          width:100%;
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          border-radius:3px;
+          font-size:11px;
+          cursor:pointer;
+          padding:3px 4px;
+        ">Upload Dial Log</button>
+        <input id="dialLogFileInput" type="file" accept=".txt" style="display:none;" />
+      </div>
       <div style="margin-top:6px; display:flex; gap:4px;">
         <button id="dialerBackspace" style="
           flex:1;
@@ -120,6 +172,8 @@
           cursor:pointer;
         ">CALL</button>
       </div>
+
+
     </div>
   `;
 
@@ -132,6 +186,15 @@
   const backspace  = panel.querySelector("#dialerBackspace");
   const clearBtn   = panel.querySelector("#dialerClear");
   const callBtn    = panel.querySelector("#dialerCall");
+
+  // Auto dial controls
+  const autoDialBtn           = panel.querySelector("#autoDialStart");
+  const autoDialCountInput    = panel.querySelector("#autoDialCount");
+  const autoDialIntervalInput = panel.querySelector("#autoDialInterval");
+
+  // Upload dial log controls
+  const uploadDialLogBtn = panel.querySelector("#uploadDialLog");
+  const dialLogFileInput = panel.querySelector("#dialLogFileInput");
 
   // ---------------------------------------------------------------------------
   // 2.5) SIMPLE DTMF-LIKE AUDIO FOR KEYS
@@ -309,6 +372,140 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Upload Dial Log -> parse file & feed digits directly to nofurs handlers
+  // ---------------------------------------------------------------------------
+  function processDialLogFile(text) {
+    if (!text) return;
+
+    const lines = text.split(/\r?\n/);
+    const sequences = [];
+
+    lines.forEach((line) => {
+      const idx = line.indexOf(":");
+      if (idx === -1) return;
+
+      const after = line.slice(idx + 1);
+      const digits = (after.match(/[0-9]/g) || []).join("");
+      if (digits) {
+        sequences.push(digits);
+      }
+    });
+
+    if (!sequences.length) return;
+
+    // As fast as possible: directly call dialOmniverseDigit for each digit.
+    // No keypad button presses, no artificial delay.
+    sequences.forEach((seq) => {
+      for (const ch of seq) {
+        dialOmniverseDigit(ch);
+      }
+    });
+
+    // Optional: brief status in display (non-blocking)
+    displayEl.textContent = `Uploaded ${sequences.length} segments`;
+    setTimeout(() => {
+      displayEl.textContent = "";
+    }, 1500);
+  }
+
+  // Auto dial logic
+  let autoDialTimer      = null;
+  let autoDialActive     = false;
+  let autoDialDigits     = "";
+  let autoDialIntervalMs = 1000;
+  let autoDialRemaining  = 0;
+
+  function stopAutoDial() {
+    autoDialActive = false;
+    if (autoDialTimer) {
+      clearTimeout(autoDialTimer);
+      autoDialTimer = null;
+    }
+    if (autoDialBtn) {
+      autoDialBtn.textContent = "Auto dial";
+    }
+  }
+
+  function startAutoDial() {
+    if (!autoDialBtn || !autoDialCountInput || !autoDialIntervalInput) return;
+
+    const current = (displayEl.textContent || "").trim();
+    const digits  = (current.match(/[0-9]/g) || []).join("");
+    if (!digits) return;
+
+    const countVal    = parseInt(autoDialCountInput.value, 10);
+    const intervalVal = parseInt(autoDialIntervalInput.value, 10);
+
+    autoDialDigits     = digits;
+    autoDialIntervalMs = (!isNaN(intervalVal) && intervalVal > 0) ? intervalVal : 1000;
+    autoDialRemaining  = (!isNaN(countVal) && countVal > 0) ? countVal : Infinity;
+
+    autoDialActive = true;
+    autoDialBtn.textContent = "Stop";
+
+    function scheduleNext() {
+      if (!autoDialActive) return;
+
+      if (autoDialRemaining === 0) {
+        stopAutoDial();
+        return;
+      }
+
+      // perform one dial
+      dialOmniverseSequence(autoDialDigits);
+      if (isFinite(autoDialRemaining)) {
+        autoDialRemaining--;
+      }
+
+      if (autoDialRemaining === 0) {
+        stopAutoDial();
+        return;
+      }
+
+      autoDialTimer = setTimeout(scheduleNext, autoDialIntervalMs);
+    }
+
+    scheduleNext();
+  }
+
+  if (autoDialBtn) {
+    autoDialBtn.addEventListener("click", () => {
+      if (autoDialActive) {
+        stopAutoDial();
+      } else {
+        startAutoDial();
+      }
+    });
+  }
+
+  // Upload Dial Log wiring
+  if (uploadDialLogBtn && dialLogFileInput) {
+    uploadDialLogBtn.addEventListener("click", () => {
+      dialLogFileInput.click();
+    });
+
+    dialLogFileInput.addEventListener("change", (e) => {
+      const input = e.target;
+      if (!input || !input.files || !input.files[0]) return;
+
+      const file = input.files[0];
+      const reader = new FileReader();
+
+      reader.onload = (ev) => {
+        const text = ev.target && typeof ev.target.result === "string"
+          ? ev.target.result
+          : "";
+        processDialLogFile(text);
+      };
+
+      reader.readAsText(file);
+
+      // reset input so selecting the same file again still fires change
+      input.value = "";
+    });
+  }
+
   // 5) CALL button: drive the omniverse dial
   if (callBtn) {
     callBtn.addEventListener("click", () => {
@@ -373,6 +570,8 @@
 
   function closePanelFn() {
     panel.style.display = "none";
+    // stop auto dial when panel closes
+    stopAutoDial();
   }
 
   toolkitBtn.addEventListener("click", () => {
