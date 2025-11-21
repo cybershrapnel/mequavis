@@ -11,10 +11,15 @@
   // Preload boom sound (boom.wav should be in the same directory as the HTML,
   // or adjust the path below if needed).
   const boomSound = new Audio("i.mp3");
-boomSound.preload = "auto";
-boomSound.volume = 0.1; // 30% volume
+  boomSound.preload = "auto";
+  boomSound.volume = 0.1; // 10% volume
 
   canvas.addEventListener("click", (e) => {
+    // 🔇 Global mute check: if set, *do not* play the sound at all.
+    if (window._meqTraversalMute) {
+      return;
+    }
+
     // Make sure the global nofurs array exists
     let nfRef;
     try {
