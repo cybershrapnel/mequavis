@@ -474,6 +474,10 @@ let omniverseAddress = "";  // accumulated address string, grows by 1 digit per 
 // Add this near your global variables:
 let segment = 1;
 let segmentHistory = [];
+// Global traversal sound mute flag
+if (typeof window._meqTraversalMute === "undefined") {
+  window._meqTraversalMute = false;
+}
 
 
 
@@ -551,7 +555,44 @@ function updateSegmentLog() {
     downloadBtn.addEventListener("click", downloadSegmentLog);
     panel.insertBefore(downloadBtn, panel.firstChild);
   }
+  // 🔇 Mute checkbox row (directly under the download button)
+  let muteRow = panel.querySelector("#segmentMuteRow");
+  if (!muteRow) {
+    muteRow = document.createElement("div");
+    muteRow.id = "segmentMuteRow";
+    muteRow.style.cssText = `
+      margin-bottom: 6px;
+      font-size: 10px;
+      color: #0ff;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    `;
 
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = "muteTraversalSound";
+    cb.style.cursor = "pointer";
+    cb.checked = !!window._meqTraversalMute;
+
+    cb.addEventListener("change", () => {
+      window._meqTraversalMute = cb.checked;
+    });
+
+    const label = document.createElement("label");
+    label.htmlFor = "muteTraversalSound";
+    label.textContent = "Mute traversal sound";
+
+    muteRow.appendChild(cb);
+    muteRow.appendChild(label);
+
+    // insert right after the download button
+    downloadBtn.insertAdjacentElement("afterend", muteRow);
+  } else {
+    // keep checkbox in sync with global flag
+    const cb = muteRow.querySelector("#muteTraversalSound");
+    if (cb) cb.checked = !!window._meqTraversalMute;
+  }
   // Header
   let header = panel.querySelector("h2.segment-header");
   if (!header) {
