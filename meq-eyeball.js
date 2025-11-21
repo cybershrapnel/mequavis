@@ -2,45 +2,40 @@
 // Wandering eyeball node that always links to a MEQUAVIS node.
 //
 // Behavior:
-//  - Normal: eye links to nearest node on canvas.
-//  - If linked node is a locked BIG wheel, line color = that wheel's bridge color.
-//  - If OMEGA is locked:
-//      * Primary line: Eye → big OMEGA center, segmented with 4 hybrid colors
-//        (ALPHA/BETA/GAMMA/DELTA ↔ OMEGA) when available.
-//      * Second line: Eye → nearest locked BIG (ALPHA/BETA/GAMMA/DELTA), solid color.
-//      * Third line: Eye → nearest small circle INSIDE ANY BIG NOFUR ONLY, solid color.
-//        (3rd line is active ANY time OMEGA is locked, even if no 2nd line exists.)
+//  - Normal (OMEGA unlocked):
+//      * Eye Link 1: Eye → nearest node (big or small), same as before.
+//      * Auto Traverse OFF: no clicks.
+//      * Auto Traverse ON:
+//          - Traversal Link (Link 4) target = Eye Link 1 target,
+//            but ONLY if it is a SMALL nofur wheel (flag "left"/"right").
+//          - Traversal Link label is "sticky": keeps showing the last small
+//            nofur wheel that Eye Link 1 pointed at, until a new one is hit.
+//          - Traversal auto-clicks that small wheel once per unique (flag:baseDigit).
 //
-// Left column UI (under Nofur Locks, above Segments):
-//  - Shows 3 links (when enabled):
+//  - OMEGA locked:
+//      * Eye Link 1: Eye → big OMEGA center, hybrid colors if available.
+//      * Eye Link 2: Eye → nearest locked big (ALPHA/BETA/GAMMA/DELTA).
+//      * Eye Link 3: Eye → nearest small circle INSIDE any big nofur (inner nodes).
+//      * Auto Traverse OFF: no traversal clicks.
+//      * Auto Traverse ON:
+//          - Traversal Link (Link 4) target = nearest small nofur WHEEL
+//            (flag "left"/"right"), independent of Eye Link 1.
+//          - Traversal Link draws a 4th line from eye → that small wheel.
+//          - Traversal auto-clicks that wheel once per unique (flag:baseDigit),
+//            without hammering it.
+//
+//  - Left column UI:
 //      Eye Link 1 → <primaryLabel>
 //      Eye Link 2 → <secondaryLabel or ->
 //      Eye Link 3 → <thirdParentLabel or -> node <thirdNodeNum or ->
-//  - Shows 7 swatches total:
-//      1–4: the 4 hybrid colors (if present)
-//      5:   second line color (if present)
-//      6:   third line color (if present)
-//      =   7: blend of all non-null colors (cumulative hybrid)
-//  - Bridge Nodes summary (always updating, even when eye is disabled):
-//      ALPHA/BETA/GAMMA/DELTA → node <locked node if locked, else live contact>
-//      OMEGA → node <locked node only when locked, else "-">
+//      Traversal Link → <sticky small wheel label or ->  (ONLY if Auto Traverse is ON)
+//
 //  - Controls:
 //      [Disable Seeker Eye] / [Enable Seeker Eye]
 //      [Follow Mouse] / [Stop Following]
 //      Eye Speed slider: 0 → stopped, up to 100 (internally 0–10× base speed)
 //      [Auto Eye Traverse] / [Stop Auto Traverse]
-//        → when enabled, whenever Eye Link 1 is connected to a SMALL nofur
-//           (flag "left"/"right"), simulate a click on that small nofur,
-//           BUT never twice in a row on the same one (by label+flag+baseDigit).
-//      [Stop Big Wheel Spin] / [Start Big Wheel Spin]
-//        → global toggle: window._meqBigWheelSpinEnabled (true/false).
-//           Your big-wheel rotation code should respect this and stop rotating
-//           the ALPHA/BETA/GAMMA/DELTA/OMEGA wheels when disabled.
-//
-//  - When eye is disabled:
-//      * No movement, no lines.
-//      * Eye is drawn parked at the center of the Sierpinski box area.
-//      * Panel shows "Eye disabled" + Bridge Nodes + controls.
+//      [Stop Nofur Spin] / [Start Nofur Spin] (global big-wheel spin toggle)
 
 (function () {
   if (window._meqEyeballPatched) return;
@@ -66,7 +61,7 @@
   if (typeof window._meqEyeAutoTraverse === "undefined") {
     window._meqEyeAutoTraverse = false;
   }
-  // NEW: master toggle for big wheel spin (used by your rotation code)
+  // Master toggle for big wheel spin (used by rotation code in main HTML)
   if (typeof window._meqBigWheelSpinEnabled === "undefined") {
     window._meqBigWheelSpinEnabled = true;
   }
@@ -86,8 +81,11 @@
   let mouseTarget = { x: null, y: null };
   let mouseListenerAttached = false;
 
-  // Auto-traverse: last small nofur we triggered on (by label+flag+baseDigit)
+  // Auto-traverse: last small nofur we triggered on (by flag+baseDigit)
   let lastTraverseNodeKey = null;
+
+  // Sticky label for Traversal Link when OMEGA is unlocked
+  let traversalStickyLabel = null;
 
   function attachMouseListener() {
     if (mouseListenerAttached) return;
@@ -495,33 +493,35 @@
     }
   }
 
-  // Auto traverse: when Eye Link 1 is on a SMALL nofur (left/right),
-  // simulate click once, but NEVER for the same (label+flag+baseDigit) twice in a row.
-  // Auto traverse: when Eye Link 1 is on a SMALL nofur (left/right),
-  // simulate click once, but NEVER for the same (flag+baseDigit) twice in a row.
+  // Auto traverse: always driven from Traversal Link (Link 4).
+  // When traversalTarget is:
+  //   - null or not a small nofur → reset key so we can fire same small again later.
+  //   - a small nofur (flag left/right, baseDigit number) → click once per unique key.
   function maybeAutoTraverse(targetNode) {
     if (!window._meqEyeAutoTraverse) return;
-    if (!targetNode || !targetNode.center) return;
 
-    // Only small nofur wheels, not big rings / small circles
-    if (targetNode.flag !== "left" && targetNode.flag !== "right") return;
-    if (typeof targetNode.baseDigit !== "number") return;
+    // No valid target or not a small side wheel → reset, but do nothing.
+    if (
+      !targetNode ||
+      !targetNode.center ||
+      (targetNode.flag !== "left" && targetNode.flag !== "right") ||
+      typeof targetNode.baseDigit !== "number"
+    ) {
+      lastTraverseNodeKey = null;
+      return;
+    }
 
-    // 🔑 STABLE identity for this small wheel:
-    //    - flag: "left" or "right"
-    //    - baseDigit: 2,3,4,5,6,7,8,9,0,1
     const key = `${targetNode.flag}:${targetNode.baseDigit}`;
 
-    // Same small nofur as last time we auto-fired → do nothing
+    // Same small nofur as last time → do nothing (prevents hammering).
     if (key === lastTraverseNodeKey) {
       return;
     }
 
-    // New small nofur → trigger once and remember
+    // New small nofur → trigger once and remember.
     simulateCanvasClickAt(targetNode.center.x, targetNode.center.y);
     lastTraverseNodeKey = key;
   }
-
 
   function drawEyeballAndLink() {
     try {
@@ -576,10 +576,15 @@
       let thirdColor = null;
       let thirdTarget = null;
 
-      let targetNode = null;
+      // Traversal Link (4th): driven by auto-traverse mode
+      let traversalTarget = null;
+      let traversalLabel = null;
 
-      // A: OMEGA locked → tri-line mode
+      let targetNode = null; // Eye Link 1 nearest node
+
+      // A: OMEGA locked → tri-line + traversal mode
       if (omegaLock.locked && omegaCenter) {
+        // Eye Link 1 → OMEGA
         targetNode = omegaCenter;
         primaryLabel = "OMEGA";
 
@@ -649,9 +654,31 @@
           thirdParentLabel = bestSmall.parentLabel || null;
         }
 
-        // In OMEGA-locked mode, auto-traverse is not used.
+        // Traversal Link (4): nearest SMALL NOFUR wheel (left/right),
+        // independent of Eye Link 1. This is what does auto traversal
+        // when OMEGA is locked.
+        let bestSmallWheel = null;
+        let bestSmallWheelDist = Infinity;
+
+        for (const n of nodes) {
+          if (!n || !n.center) continue;
+          if (n.flag !== "left" && n.flag !== "right") continue; // only small side wheels
+
+          const dx = eyeball.x - n.center.x;
+          const dy = eyeball.y - n.center.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestSmallWheelDist) {
+            bestSmallWheelDist = d2;
+            bestSmallWheel = n;
+          }
+        }
+
+        if (bestSmallWheel) {
+          traversalTarget = bestSmallWheel;
+          traversalLabel = bestSmallWheel.label || null;
+        }
       } else {
-        // B: Normal behavior
+        // B: Normal behavior (OMEGA unlocked)
         let closest = null;
         let bestDist = Infinity;
 
@@ -682,20 +709,24 @@
           primaryColor = "#0ff";
         }
 
-        // Auto eye traverse in normal mode only
-        maybeAutoTraverse(targetNode);
+        // Traversal Link (4) in normal mode:
+        //   - target = Eye Link 1 target ONLY if it is a small nofur wheel.
+        //   - label is sticky: remembers last small wheel until a new one is hit.
+        if (
+          targetNode &&
+          (targetNode.flag === "left" || targetNode.flag === "right") &&
+          typeof targetNode.baseDigit === "number"
+        ) {
+          traversalTarget = targetNode;
+          traversalStickyLabel = targetNode.label || traversalStickyLabel;
+        }
+
+        traversalLabel = traversalStickyLabel;
       }
-      // 🔁 Reset last small-click whenever Eye Link 1 is on a BIG nofur wheel
-      // (i.e., not a small left/right wheel). This lets us click the same
-      // small wheel twice in a row as long as we "touch" a big wheel in between.
-      if (
-        targetNode &&
-        targetNode.flag !== "left" &&
-        targetNode.flag !== "right"
-      ) {
-        lastTraverseNodeKey = null;
-      }
-      // Primary line
+
+      // === Draw lines ===
+
+      // Eye Link 1: primary line
       if (targetNode && targetNode.center) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -716,7 +747,7 @@
         }
       }
 
-      // Second line
+      // Eye Link 2
       if (secondaryTarget && secondaryTarget.center && secondaryColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -733,7 +764,7 @@
         ctx.restore();
       }
 
-      // Third line
+      // Eye Link 3
       if (thirdTarget && thirdTarget.center && thirdColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -750,6 +781,34 @@
         ctx.restore();
       }
 
+      // Traversal Link (4): only visible when Auto Traverse is ON and we have a target
+      if (
+        window._meqEyeAutoTraverse &&
+        traversalTarget &&
+        traversalTarget.center
+      ) {
+        const x1 = eyeball.x;
+        const y1 = eyeball.y;
+        const x2 = traversalTarget.center.x;
+        const y2 = traversalTarget.center.y;
+
+        ctx.save();
+        ctx.strokeStyle =
+          traversalTarget.color ||
+          (thirdColor || primaryColor || "#0f0"); // fallback colors
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]); // dashed to visually distinguish traversal
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      // Run traversal click logic AFTER we determine traversalTarget
+      maybeAutoTraverse(traversalTarget);
+
       drawEyeballOnly();
 
       window._meqEyeballStatus = {
@@ -760,7 +819,8 @@
         secondaryColor,
         thirdParentLabel,
         thirdNodeNum,
-        thirdColor
+        thirdColor,
+        traversalLabel
       };
     } catch (err) {
       console.warn("[meq-eyeball] draw error:", err);
@@ -922,7 +982,7 @@
 
       autoRow.appendChild(autoBtn);
 
-      // NEW: Big Wheel Spin toggle button, same row
+      // Big Wheel Spin toggle
       const bigSpinBtn = document.createElement("button");
       bigSpinBtn.id = "bigWheelSpinBtn";
       bigSpinBtn.style.flex = "1 1 auto";
@@ -1067,7 +1127,8 @@
       secondaryColor,
       thirdParentLabel,
       thirdNodeNum,
-      thirdColor
+      thirdColor,
+      traversalLabel
     } = status;
 
     html += `<div style="font-size:10px;color:#0ff;">`;
@@ -1076,6 +1137,9 @@
     html += `<br>Eye Link 3 → ${
       thirdParentLabel || "-"
     } node ${thirdNodeNum != null ? thirdNodeNum : "-"}`;
+    if (autoTrav) {
+      html += `<br>Traversal Link → ${traversalLabel || "-"}`;
+    }
     html += `</div>`;
 
     const baseCols = new Array(6).fill(null);
@@ -1150,6 +1214,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse with no repeated small nofur + big wheel spin toggle)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle)."
   );
 })();
