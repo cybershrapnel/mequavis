@@ -614,25 +614,42 @@ let gasketPower = 1;
 const GASKET_MAX = 17; // gasket goes 1..18 then wraps
 
 // Render the segment history into the left panel
+// Render the segment history into the left panel without nuking other children
 function updateSegmentLog() {
   const panel = document.getElementById("segmentLog");
   if (!panel) return;
 
+  // Create header + list container once and then reuse them
+  let header = panel.querySelector("h2.segment-header");
+  let list   = panel.querySelector(".segment-list");
+
+  if (!header) {
+    header = document.createElement("h2");
+    header.className = "segment-header";
+    header.textContent = "Segments";
+    panel.appendChild(header);
+  }
+
+  if (!list) {
+    list = document.createElement("div");
+    list.className = "segment-list";
+    panel.appendChild(list);
+  }
+
+  // Now only touch the list's innerHTML, not the whole panel
   if (segmentHistory.length === 0) {
-    panel.innerHTML = `<h2>Segments</h2><div class="entry">No segments yet</div>`;
+    list.innerHTML = `<div class="entry">No segments yet</div>`;
     return;
   }
 
-  panel.innerHTML = `
-    <h2>Segments</h2>
-    ${segmentHistory.map(entry =>
-      `<div class="entry">
-         Gasket ${entry.gasket}<sup>${entry.power}</sup>,
-         Seg ${entry.segment}: ${entry.address}
-       </div>`
-    ).join("")}
-  `;
+  list.innerHTML = segmentHistory.map(entry =>
+    `<div class="entry">
+       Gasket ${entry.gasket}<sup>${entry.power}</sup>,
+       Seg ${entry.segment}: ${entry.address}
+     </div>`
+  ).join("");
 }
+
 
 
 // Initialize empty panel once
