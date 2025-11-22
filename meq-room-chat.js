@@ -18,10 +18,12 @@
   let pollTimerId       = null;
 
   // DOM refs
-  let headerEl        = null;
-  let usernameInputEl = null;
-  let messageInputEl  = null;
-  let sendBtnEl       = null;
+  let headerEl            = null;
+  let usernameInputEl     = null;
+  let messageInputEl      = null;
+  let sendBtnEl           = null;
+  let historyBtnEl        = null;
+  let historyCountInputEl = null;
 
   // --- SEND cooldown state for anti-spam ------------------------------------
   const SEND_COOLDOWN_SECONDS   = 60;
@@ -240,6 +242,107 @@
   }
 
   // ---------------------------------------------------------------------------
+  // MANUAL HISTORY LOAD
+  // ---------------------------------------------------------------------------
+  async function loadHistoryForCurrentRoom() {
+    // Ensure mapped to correct gasket power
+    await ensureRoomMapping();
+
+    if (!currentRoomId) {
+      appendToMainChat("System", "No active gasket power room; cannot load history.");
+      return;
+    }
+
+    // How many messages back?
+    let count = 50;
+    if (historyCountInputEl) {
+      const raw = historyCountInputEl.value;
+      const n   = parseInt(raw, 10);
+      if (!isNaN(n) && n > 0) {
+        count = n;
+      }
+    }
+
+    try {
+      // First: get total count cheaply by asking from a huge index
+      const probeRes = await fetch(ROOM_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action:     "poll_messages",
+          room_id:    currentRoomId,
+          from_index: 999999999   // PHP clamps to total
+        })
+      });
+
+      if (!probeRes.ok) {
+        console.error("history probe HTTP error", probeRes.status);
+        appendToMainChat("System", "Failed to probe gasket history (" + probeRes.status + ").");
+        return;
+      }
+
+      const probeData = await probeRes.json();
+      const total     = typeof probeData.next_index === "number"
+        ? probeData.next_index
+        : 0;
+
+      if (total <= 0) {
+        appendToMainChat("System", "No history for this gasket power room.");
+        return;
+      }
+
+      const startIndex = Math.max(0, total - count);
+
+      const histRes = await fetch(ROOM_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action:     "poll_messages",
+          room_id:    currentRoomId,
+          from_index: startIndex
+        })
+      });
+
+      if (!histRes.ok) {
+        console.error("history fetch HTTP error", histRes.status);
+        appendToMainChat("System", "Failed to load gasket history (" + histRes.status + ").");
+        return;
+      }
+
+      const histData = await histRes.json();
+      const msgs     = Array.isArray(histData.messages) ? histData.messages : [];
+
+      if (!msgs.length) {
+        appendToMainChat("System", "No additional history messages.");
+        return;
+      }
+
+      appendToMainChat(
+        "System",
+        `Loaded last ${Math.min(count, total)} message(s) for ${getGasketHeaderLabel()}.`
+      );
+
+      msgs.forEach(m => {
+        const u = (m.username || "Anon").toString();
+        const t = (m.text || "").toString();
+        appendToMainChat(u, t);
+      });
+
+      // Keep polling aligned to end of log
+      if (typeof histData.next_index === "number") {
+        if (histData.next_index > lastPollIndex) {
+          lastPollIndex = histData.next_index;
+        }
+      } else if (total > lastPollIndex) {
+        lastPollIndex = total;
+      }
+    } catch (err) {
+      console.error("history fetch exception", err);
+      appendToMainChat("System", "Error loading gasket history: " + err.message);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // POLLING: GET NEW MESSAGES
   // ---------------------------------------------------------------------------
   async function pollRoomMessages() {
@@ -312,6 +415,24 @@
     block.style.fontSize = "10px";
 
     block.innerHTML = ''
+      // NEW: history row ABOVE the header
+      + '<div id="gasketHistoryRow"'
+      + '     style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'
+      + '  <button id="gasketHistoryBtn"'
+      + '          style="flex:0 0 auto;padding:2px 6px;font-size:10px;'
+      + '                 background:#111;border:1px solid #0ff;color:#0ff;'
+      + '                 border-radius:3px;cursor:pointer;">'
+      + '    Load History'
+      + '  </button>'
+      + '  <label style="flex:1 1 auto;font-size:10px;">'
+      + '    Last'
+      + '    <input type="number" id="gasketHistoryCount" value="50" min="1"'
+      + '           style="width:60px;margin:0 4px;background:#050505;'
+      + '                  border:1px solid #0ff;color:#0ff;border-radius:3px;'
+      + '                  padding:1px 3px;font-size:10px;">'
+      + '    msgs'
+      + '  </label>'
+      + '</div>'
       + '<h3 id="gasketRoomHeader"'
       + '    style="margin:0 0 4px 0;font-size:11px;color:#0ff;">'
       + '  Gasket Power Chat 1'
@@ -337,10 +458,12 @@
 
     chatInfoContent.appendChild(block);
 
-    headerEl        = block.querySelector("#gasketRoomHeader");
-    usernameInputEl = block.querySelector("#gasketRoomUsername");
-    messageInputEl  = block.querySelector("#gasketRoomInput");
-    sendBtnEl       = block.querySelector("#gasketRoomSendBtn");
+    headerEl            = block.querySelector("#gasketRoomHeader");
+    usernameInputEl     = block.querySelector("#gasketRoomUsername");
+    messageInputEl      = block.querySelector("#gasketRoomInput");
+    sendBtnEl           = block.querySelector("#gasketRoomSendBtn");
+    historyBtnEl        = block.querySelector("#gasketHistoryBtn");
+    historyCountInputEl = block.querySelector("#gasketHistoryCount");
 
     // Restore saved username if present
     try {
@@ -362,6 +485,12 @@
           e.preventDefault();
           sendRoomMessage();
         }
+      });
+    }
+
+    if (historyBtnEl) {
+      historyBtnEl.addEventListener("click", function () {
+        loadHistoryForCurrentRoom();
       });
     }
 
