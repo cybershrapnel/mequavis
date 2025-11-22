@@ -30,6 +30,7 @@
 //      Eye Link 3 → <thirdParentLabel or -> node <thirdNodeNum or ->
 //      Traversal Link → <sticky small wheel label or ->  (ONLY if Auto Traverse is ON)
 //
+//
 //  - Controls:
 //      [Disable Seeker Eye] / [Enable Seeker Eye]
 //      [Follow Mouse] / [Stop Following]
@@ -75,6 +76,61 @@
     GAMMA: 1.2
   };
 
+  // ---------------------------------------------------------------------------
+  // OMNIVERSE LABEL HELPERS (DISPLAY ONLY)
+  // ---------------------------------------------------------------------------
+
+  // Turn something like "L2-O..27" into "Layer 2 – Omniverse 027"
+  function formatOmniLabel(raw) {
+    if (!raw) return raw;
+    let out = String(raw);
+
+    // L → Layer
+    out = out.replace(/\bL(\d+)/g, "Layer $1");
+
+    // O.. → Omniverse <current omniverseNumber>
+    const omni = (typeof window.omniverseNumber === "string" &&
+                  window.omniverseNumber.length)
+      ? window.omniverseNumber
+      : "..";
+
+    // Handles "O.." variants
+    out = out.replace(/O\.\./g, "Omniverse " + omni);
+
+    return out;
+  }
+
+  // Prepend Gasket + Segment on their own line above the label
+  function prependGasketSegment(label) {
+    if (!label) return label;
+
+    const g  = (typeof window.gasketCurrent === "number")
+      ? window.gasketCurrent
+      : null;
+    const gp = (typeof window.gasketPowerCurrent === "number")
+      ? window.gasketPowerCurrent
+      : null;
+    const seg = (typeof window.segmentCurrent === "number")
+      ? window.segmentCurrent
+      : null;
+
+    let gasketLabel;
+    if (g != null && gp != null) {
+      gasketLabel = gp === 1
+        ? `Gasket ${g}`
+        : `Gasket ${g}^${gp}`;
+    } else {
+      gasketLabel = "Gasket ?";
+    }
+
+    const segLabel = seg != null ? `Segment ${seg}` : "Segment ?";
+
+    // Line break before the Layer/Omniverse part
+    return `${gasketLabel}, ${segLabel}<br>${label}`;
+  }
+
+  // ---------------------------------------------------------------------------
+
   let eyeball = null;
 
   // Mouse-follow target (canvas coords)
@@ -84,12 +140,15 @@
   // Auto-traverse: last small nofur we triggered on (by flag+baseDigit)
   let lastTraverseNodeKey = null;
 
-  // NEW: disabled-eye random traversal state
+  // Snapshot of traversal display text (frozen at moment of click)
+  let traversalDisplaySnapshot = null;
+
+  // Disabled-eye random traversal state
   let disabledTraverseTarget = null;
   let disabledTraverseLastSwitchTime = 0;
-  let disabledTraverseInterval = 0; // ms between picks (20–200)
+  let disabledTraverseInterval = 0; // ms between picks (20–200, scaled)
 
-  // Sticky label for Traversal Link when OMEGA is unlocked
+  // Sticky label for Traversal Link when OMEGA is unlocked (raw label, like "L2-O..2")
   let traversalStickyLabel = null;
 
   function attachMouseListener() {
@@ -142,7 +201,7 @@
 
     const sliderVal = getSpeedScale();  // 0..100
     const norm = sliderVal / 10;        // 0..10
-    const speed = eyeball.baseSpeed * norm; // 0.. ~25 px/frame
+       const speed = eyeball.baseSpeed * norm; // 0.. ~25 px/frame
 
     if (speed <= 0) return; // frozen
 
@@ -336,7 +395,7 @@
     ctx.restore();
   }
 
-  // NEW: get parked/disabled eye anchor position
+  // Parked/disabled eye anchor position
   function getDisabledEyeballAnchor() {
     try {
       if (typeof center !== "undefined" && center) {
@@ -357,12 +416,6 @@
   function drawEyeballOnly() {
     if (!eyeball) return;
     drawEyeballAt(eyeball.x, eyeball.y);
-  }
-
-  function drawEyeballDisabled() {
-    if (!eyeball || typeof ctx === "undefined") return;
-    const pos = getDisabledEyeballAnchor();
-    drawEyeballAt(pos.x, pos.y);
   }
 
   function drawSegmentedLine(x1, y1, x2, y2, colors) {
@@ -506,125 +559,130 @@
   }
 
   // Auto traverse: always driven from Traversal Link (Link 4).
-  // When traversalTarget is:
-  //   - null or not a small nofur → reset key so we can fire same small again later.
-  //   - a small nofur (flag left/right, baseDigit number) → click once per unique key.
-  function maybeAutoTraverse(targetNode) {
+  // We:
+  //  1) Build traversal text from the *current* (pre-click) globals
+  //  2) Snapshot that text
+  //  3) Click the small nofur
+  //  4) Never change the snapshot again until a new small nofur is targeted
+  function maybeAutoTraverse(targetNode, rawTraversalLabel) {
     if (!window._meqEyeAutoTraverse) return;
 
-    // No valid target or not a small side wheel → reset, but do nothing.
+    // If the current traversal target isn't a small side wheel,
+    // DO NOT clear the snapshot — keep the last text until a real
+    // small wheel is hit again.
     if (
       !targetNode ||
       !targetNode.center ||
       (targetNode.flag !== "left" && targetNode.flag !== "right") ||
       typeof targetNode.baseDigit !== "number"
     ) {
-      lastTraverseNodeKey = null;
       return;
     }
 
     const key = `${targetNode.flag}:${targetNode.baseDigit}`;
 
-    // Same small nofur as last time → do nothing (prevents hammering).
+    // Same small nofur as last time → no new click, keep old snapshot text.
     if (key === lastTraverseNodeKey) {
       return;
     }
 
-    // New small nofur → trigger once and remember.
+    // --- NEW TARGET: snapshot the *pre-click* text first ---
+
+    // Prefer the raw traversal label; fall back to node.label if needed
+    let labelToUse = rawTraversalLabel;
+    if (!labelToUse && typeof targetNode.label === "string") {
+      labelToUse = targetNode.label;
+    }
+
+    if (labelToUse) {
+      let t = formatOmniLabel(labelToUse); // L → Layer, O.. → Omniverse N
+      t = prependGasketSegment(t);        // Gasket / Segment line
+      traversalDisplaySnapshot = t;
+    } else {
+      traversalDisplaySnapshot = "-";
+    }
+
+    // --- Now fire the click, which mutates segment/gasket/omniverse ---
     simulateCanvasClickAt(targetNode.center.x, targetNode.center.y);
     lastTraverseNodeKey = key;
   }
 
- // NEW: when eye is DISABLED but Auto Traverse is ON,
-// randomly pick a small nofur every (scaled) interval
-// and keep a line drawn to the last picked one until the next pick.
-function updateDisabledAutoTraverse(timestamp) {
-  if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
-    disabledTraverseTarget = null;
-    disabledTraverseInterval = 0;
-    disabledTraverseLastSwitchTime = 0;
-    return;
+  // Disabled-eye random small-wheel traversal (visual + click)
+  function updateDisabledAutoTraverse(timestamp) {
+    if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
+      disabledTraverseTarget = null;
+      disabledTraverseInterval = 0;
+      disabledTraverseLastSwitchTime = 0;
+      return;
+    }
+
+    let nodes = [];
+    if (Array.isArray(window.nofurs)) {
+      nodes = window.nofurs;
+    } else if (typeof nofurs !== "undefined" && Array.isArray(nofurs)) {
+      nodes = nofurs;
+    }
+
+    const smalls = nodes.filter(
+      (n) =>
+        n &&
+        n.center &&
+        (n.flag === "left" || n.flag === "right")
+    );
+
+    if (!smalls.length) {
+      disabledTraverseTarget = null;
+      return;
+    }
+
+    function computeInterval() {
+      const speedValRaw = getSpeedScale();   // 0..100
+      const speedVal = speedValRaw <= 0 ? 0.25 : speedValRaw;
+
+      const baselineMin = 20;   // ms
+      const baselineMax = 200;  // ms
+      const base = baselineMin + Math.random() * (baselineMax - baselineMin);
+
+      const multiplier = 10 / speedVal; // lower slider → slower picks, higher → faster
+
+      return base * multiplier;
+    }
+
+    // Initialize on first run
+    if (!disabledTraverseTarget) {
+      const idx = Math.floor(Math.random() * smalls.length);
+      disabledTraverseTarget = smalls[idx];
+      disabledTraverseInterval = computeInterval();
+      disabledTraverseLastSwitchTime = timestamp;
+      return;
+    }
+
+    if (!disabledTraverseInterval) {
+      disabledTraverseInterval = computeInterval();
+    }
+    if (!disabledTraverseLastSwitchTime) {
+      disabledTraverseLastSwitchTime = timestamp;
+    }
+
+    const elapsed = timestamp - disabledTraverseLastSwitchTime;
+    if (elapsed >= disabledTraverseInterval) {
+      const idx = Math.floor(Math.random() * smalls.length);
+      disabledTraverseTarget = smalls[idx];
+      disabledTraverseInterval = computeInterval(); // next scaled interval
+      disabledTraverseLastSwitchTime = timestamp;
+    }
   }
-
-  // Grab nofurs
-  let nodes = [];
-  if (Array.isArray(window.nofurs)) {
-    nodes = window.nofurs;
-  } else if (typeof nofurs !== "undefined" && Array.isArray(nofurs)) {
-    nodes = nofurs;
-  }
-
-  const smalls = nodes.filter(
-    (n) =>
-      n &&
-      n.center &&
-      (n.flag === "left" || n.flag === "right")
-  );
-
-  if (!smalls.length) {
-    disabledTraverseTarget = null;
-    return;
-  }
-
-  // 🔹 Helper: compute interval (ms) scaled by Eye Speed slider
-  // Slider is 0..100, baseline is at 10.
-  // At 10 → factor 1 → 20–200ms (current behavior)
-  // Below 10 → factor >1 → slower
-  // Above 10 → factor <1 → faster
-function computeInterval() {
-  const speedValRaw = getSpeedScale();   // 0..100 from slider
-  // 🔹 If slider is at 0, treat it as 0.25 instead so it doesn't bug out
-  const speedVal = speedValRaw <= 0 ? 0.25 : speedValRaw;
-
-  const baselineMin = 20;   // ms
-  const baselineMax = 200;  // ms
-  const base = baselineMin + Math.random() * (baselineMax - baselineMin);
-
-  // At 10 → factor 1 → 20–200ms (baseline)
-  // Below 10 → factor >1 → slower
-  // Above 10 → factor <1 → faster
-  const multiplier = 10 / speedVal;
-
-  return base * multiplier;
-}
-
-
-  // Initialize on first run
-  if (!disabledTraverseTarget) {
-    const idx = Math.floor(Math.random() * smalls.length);
-    disabledTraverseTarget = smalls[idx];
-    disabledTraverseInterval = computeInterval();
-    disabledTraverseLastSwitchTime = timestamp;
-    return;
-  }
-
-  if (!disabledTraverseInterval) {
-    disabledTraverseInterval = computeInterval();
-  }
-  if (!disabledTraverseLastSwitchTime) {
-    disabledTraverseLastSwitchTime = timestamp;
-  }
-
-  const elapsed = timestamp - disabledTraverseLastSwitchTime;
-  if (elapsed >= disabledTraverseInterval) {
-    const idx = Math.floor(Math.random() * smalls.length);
-    disabledTraverseTarget = smalls[idx];
-    disabledTraverseInterval = computeInterval(); // next scaled interval
-    disabledTraverseLastSwitchTime = timestamp;
-  }
-}
-
 
   function drawEyeballAndLink() {
     try {
       if (typeof ctx === "undefined") return;
       if (!eyeball) return;
 
-      // NEW: Disabled eye but Auto Traverse ON → park the eye,
-      // draw a line to the last random small nofur, and keep it
-      // until the next random pick.
+      // Disabled eye but Auto Traverse ON → park and draw to random small nofur
       if (!window._meqEyeEnabled) {
         const anchor = getDisabledEyeballAnchor();
+
+        let traversalLabel = null;
 
         if (
           window._meqEyeAutoTraverse &&
@@ -646,14 +704,30 @@ function computeInterval() {
           ctx.stroke();
           ctx.restore();
 
-          // still respect the auto-traverse click semantics
-          maybeAutoTraverse(disabledTraverseTarget);
+          traversalLabel = disabledTraverseTarget.label || null;
+
+          // Use the same pre-click snapshot logic for disabled mode
+          maybeAutoTraverse(disabledTraverseTarget, traversalLabel);
         }
 
         drawEyeballAt(anchor.x, anchor.y);
-        window._meqEyeballStatus = null;
+
+        // Even when disabled, expose traversalLabel so the UI can show Traversal Link
+        window._meqEyeballStatus = {
+          primaryLabel: null,
+          primaryColor: null,
+          primaryHybridColors: null,
+          secondaryLabel: null,
+          secondaryColor: null,
+          thirdParentLabel: null,
+          thirdNodeNum: null,
+          thirdColor: null,
+          traversalLabel
+        };
         return;
       }
+
+      // === Eye enabled path ===
 
       let nodes = [];
       if (Array.isArray(window.nofurs)) {
@@ -697,13 +771,13 @@ function computeInterval() {
       let thirdColor = null;
       let thirdTarget = null;
 
-      // Traversal Link (4th): driven by auto-traverse mode
+      // Traversal Link (4th)
       let traversalTarget = null;
       let traversalLabel = null;
 
       let targetNode = null; // Eye Link 1 nearest node
 
-      // A: OMEGA locked → tri-line + traversal mode
+      // A: OMEGA locked → tri-line + traversal
       if (omegaLock.locked && omegaCenter) {
         // Eye Link 1 → OMEGA
         targetNode = omegaCenter;
@@ -775,15 +849,13 @@ function computeInterval() {
           thirdParentLabel = bestSmall.parentLabel || null;
         }
 
-        // Traversal Link (4): nearest SMALL NOFUR wheel (left/right),
-        // independent of Eye Link 1. This is what does auto traversal
-        // when OMEGA is locked.
+        // Traversal Link (4): nearest SMALL nofur wheel (left/right)
         let bestSmallWheel = null;
         let bestSmallWheelDist = Infinity;
 
         for (const n of nodes) {
           if (!n || !n.center) continue;
-          if (n.flag !== "left" && n.flag !== "right") continue; // only small side wheels
+          if (n.flag !== "left" && n.flag !== "right") continue;
 
           const dx = eyeball.x - n.center.x;
           const dy = eyeball.y - n.center.y;
@@ -832,7 +904,7 @@ function computeInterval() {
 
         // Traversal Link (4) in normal mode:
         //   - target = Eye Link 1 target ONLY if it is a small nofur wheel.
-        //   - label is sticky: remembers last small wheel until a new one is hit.
+        //   - label is sticky across frames.
         if (
           targetNode &&
           (targetNode.flag === "left" || targetNode.flag === "right") &&
@@ -847,7 +919,7 @@ function computeInterval() {
 
       // === Draw lines ===
 
-      // Eye Link 1: primary line
+      // Eye Link 1
       if (targetNode && targetNode.center) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -902,7 +974,7 @@ function computeInterval() {
         ctx.restore();
       }
 
-      // Traversal Link (4): only visible when Auto Traverse is ON and we have a target
+      // Traversal Link (4)
       if (
         window._meqEyeAutoTraverse &&
         traversalTarget &&
@@ -916,9 +988,9 @@ function computeInterval() {
         ctx.save();
         ctx.strokeStyle =
           traversalTarget.color ||
-          (thirdColor || primaryColor || "#0f0"); // fallback colors
+          (thirdColor || primaryColor || "#0f0");
         ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]); // dashed to visually distinguish traversal
+        ctx.setLineDash([4, 3]);
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
@@ -927,8 +999,8 @@ function computeInterval() {
         ctx.restore();
       }
 
-      // Run traversal click logic AFTER we determine traversalTarget
-      maybeAutoTraverse(traversalTarget);
+      // Auto traverse click (with pre-click text snapshot)
+      maybeAutoTraverse(traversalTarget, traversalLabel);
 
       drawEyeballOnly();
 
@@ -953,12 +1025,12 @@ function computeInterval() {
     const panel = document.getElementById("segmentLog");
     if (!panel) return;
 
-    const enabled = !!window._meqEyeEnabled;
-    const follow = !!window._meqEyeFollowMouse;
-    const autoTrav = !!window._meqEyeAutoTraverse;
-    const bigSpin = !!window._meqBigWheelSpinEnabled;
+    const enabled   = !!window._meqEyeEnabled;
+    const follow    = !!window._meqEyeFollowMouse;
+    const autoTrav  = !!window._meqEyeAutoTraverse;
+    const bigSpin   = !!window._meqBigWheelSpinEnabled;
     const speedScale = getSpeedScale();
-    const status = window._meqEyeballStatus;
+    const status    = window._meqEyeballStatus;
 
     let container = document.getElementById("seekerStatus");
     if (!container) {
@@ -1103,7 +1175,6 @@ function computeInterval() {
 
       autoRow.appendChild(autoBtn);
 
-      // Big Wheel Spin toggle
       const bigSpinBtn = document.createElement("button");
       bigSpinBtn.id = "bigWheelSpinBtn";
       bigSpinBtn.style.flex = "1 1 auto";
@@ -1231,10 +1302,17 @@ function computeInterval() {
 
     let html = `<h3 style="font-size:11px;color:#0ff;margin:4px 0 2px;">Seeker Links</h3>`;
 
-    if (!enabled || !status) {
+    // Show a note if disabled, but DO NOT bail out – we still want Traversal Link text.
+    if (!enabled) {
       html += `<div style="font-size:10px;color:#888;">
-        Seeker eye is currently <span style="color:#f33;">DISABLED</span>.
+        Seeker eye is currently <span style="color:#f33;">DISABLED</span> (Auto Traverse ${
+          autoTrav ? "ON" : "OFF"
+        }).
       </div>`;
+    }
+
+    // If we have no status at all, fall back to bridge node info only.
+    if (!status) {
       html += buildBridgeNodesHtml();
       html += `<br>`;
       content.innerHTML = html;
@@ -1243,34 +1321,111 @@ function computeInterval() {
 
     const {
       primaryLabel,
+      primaryColor,
       primaryHybridColors,
       secondaryLabel,
       secondaryColor,
       thirdParentLabel,
       thirdNodeNum,
       thirdColor,
-      traversalLabel
+      traversalLabel // raw short label of link 4
     } = status;
 
+    // Eye Link 1: raw label, but:
+    //  When OMEGA is locked and active, append the current short form of link 4.
+    const lockState = window.nofurLockState || {};
+    const omegaLock = lockState.OMEGA || { locked: false };
+
+    let displayPrimaryLabel = primaryLabel || "-";
+    if (
+      primaryLabel === "OMEGA" &&
+      omegaLock.locked &&
+      traversalLabel
+    ) {
+      displayPrimaryLabel = `OMEGA ${traversalLabel}`;
+    }
+
+    // Traversal Link: show frozen pre-click snapshot (works for enabled & disabled)
+    const displayTraversalLabel = traversalDisplaySnapshot || "-";
+
     html += `<div style="font-size:10px;color:#0ff;">`;
-    html += `Eye Link 1 → ${primaryLabel || "-"}`;
+    html += `Eye Link 1 → ${displayPrimaryLabel}`;
     html += `<br>Eye Link 2 → ${secondaryLabel || "-"}`;
     html += `<br>Eye Link 3 → ${
       thirdParentLabel || "-"
     } node ${thirdNodeNum != null ? thirdNodeNum : "-"}`;
     if (autoTrav) {
-      html += `<br>Traversal Link → ${traversalLabel || "-"}`;
+      html += `<br>Traversal Link → ${displayTraversalLabel}`;
     }
     html += `</div>`;
 
+    // --- COLOR SWATCHES: first 4 always populated ---
     const baseCols = new Array(6).fill(null);
-    if (Array.isArray(primaryHybridColors)) {
+
+    // Prefer global OMEGA hybrid palette for the first 4 swatches,
+    // regardless of OMEGA lock state.
+    let omegaHybrids = getOmegaHybridColors();
+
+    if (Array.isArray(omegaHybrids) && omegaHybrids.length) {
       for (let i = 0; i < 4; i++) {
-        baseCols[i] = primaryHybridColors[i] || null;
+        baseCols[i] = omegaHybrids[i % omegaHybrids.length];
+      }
+    } else if (Array.isArray(primaryHybridColors) && primaryHybridColors.length) {
+      // Fallback: use Eye Link 1's hybrid colors if present
+      for (let i = 0; i < 4; i++) {
+        baseCols[i] =
+          primaryHybridColors[i] ||
+          primaryHybridColors[primaryHybridColors.length - 1];
+      }
+    } else if (primaryColor) {
+      // Last resort: fill with the primary link color
+      for (let i = 0; i < 4; i++) {
+        baseCols[i] = primaryColor;
+      }
+    } else {
+      // Absolute fallback: give them something visible
+      for (let i = 0; i < 4; i++) {
+        baseCols[i] = "#0ff";
       }
     }
-    if (secondaryColor) baseCols[4] = secondaryColor;
+
+    // Swatch 5 (secondary or composite big-bridge) & 6 (third link)
+    if (secondaryColor) {
+      baseCols[4] = secondaryColor;
+    }
+
+    // If swatch 5 is still null, use a concat/blend of any locked
+    // ALPHA/BETA/GAMMA/DELTA bridge colors (NOT OMEGA).
+    if (!baseCols[4]) {
+      const lsAll = window.nofurLockState || {};
+      const bridgeLabels = ["ALPHA", "BETA", "GAMMA", "DELTA"];
+      const bridgeCols = [];
+
+      for (const label of bridgeLabels) {
+        const ls = lsAll[label];
+        if (ls && ls.locked) {
+          const col = getBridgeColor(label);
+          if (col) bridgeCols.push(col);
+        }
+      }
+
+      if (bridgeCols.length) {
+        baseCols[4] = bridgeCols.reduce(
+          (acc, c) => (acc ? blendColors(acc, c) : c),
+          null
+        );
+      }
+      // If no bridgeCols, we intentionally leave baseCols[4] as null.
+    }
+
     if (thirdColor) baseCols[5] = thirdColor;
+
+    // >>> NEW: when seeker is DISABLED and OMEGA is locked,
+    //     swatch 6 shows the color OMEGA is locked to.
+    if (!enabled && omegaLock.locked) {
+      baseCols[5] = getBridgeColor("OMEGA");
+    }
+    // <<< END NEW
 
     const valid = baseCols.filter(Boolean);
     let mixColor = null;
@@ -1310,13 +1465,16 @@ function computeInterval() {
     content.innerHTML = html;
   }
 
+
   function eyeballStep(timestamp) {
     ensureEyeballInit();
     attachMouseListener();
     if (!eyeball) return;
 
     // Update random disabled traverse timing
-    updateDisabledAutoTraverse(typeof timestamp === "number" ? timestamp : performance.now());
+    updateDisabledAutoTraverse(
+      typeof timestamp === "number" ? timestamp : performance.now()
+    );
 
     if (window._meqEyeEnabled) {
       if (window._meqEyeFollowMouse) {
@@ -1338,6 +1496,6 @@ function computeInterval() {
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal + omniverse-aware labels + gasket/segment prefix + pre-click traversal snapshot + OMEGA+L4 short label + disabled-mode Traversal Link display + always-on 4-swatch palette + composite non-OMEGA bridge swatch 5)."
   );
 })();
