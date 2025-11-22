@@ -1,5 +1,5 @@
 // meq-ads.js
-// Injects an advertisement panel under the "Send to Segment Room" button
+// Injects an advertisement panel under the gasket chat send button
 // - Shows a muted looping video chosen randomly from a list
 // - Changes to another random video every 5 minutes
 // - Has a close (X) button to hide the panel
@@ -68,22 +68,38 @@
     }, ROTATION_INTERVAL_MS);
   }
 
+  function findGasketSendButton() {
+    // 1) Prefer new gasket power chat button by ID
+    let btn = document.getElementById("gasketRoomSendBtn");
+    if (btn) return btn;
+
+    // 2) Fallback to old segment room button ID (if you ever use it again)
+    btn = document.getElementById("segmentRoomSendBtn");
+    if (btn) return btn;
+
+    // 3) Fallback to text search (covers both old + new labels)
+    const allButtonsAndLinks = Array.from(document.querySelectorAll("button, a"));
+    const anchor = allButtonsAndLinks.find(el => {
+      const txt = (el.textContent || "").trim().toUpperCase();
+      return txt.includes("SEND TO GASKET POWER CHAT") ||
+             txt.includes("SEND TO SEGMENT ROOM");
+    });
+
+    return anchor || null;
+  }
+
   function injectAdPanel() {
     // Don't double-inject
     if (document.getElementById("meqAdPanel")) return;
 
-    // 1) Find the "Send to Segment Room" button anywhere in the UI
-    const allButtonsAndLinks = Array.from(document.querySelectorAll("button, a"));
-    const anchor = allButtonsAndLinks.find(el =>
-      el.textContent.trim().toUpperCase().includes("SEND TO SEGMENT ROOM")
-    );
-
+    // Find the gasket/segment room send button
+    const anchor = findGasketSendButton();
     if (!anchor) {
-      console.warn("meq-ads.js: 'Send to Segment Room' button not found yet.");
+      console.warn("meq-ads.js: gasket/segment room send button not found yet.");
       return;
     }
 
-    // 2) Create the ad panel container
+    // Create the ad panel container
     const adPanel = document.createElement("div");
     adPanel.id = "meqAdPanel";
     adPanel.style.marginTop = "8px";
@@ -95,7 +111,7 @@
     adPanel.style.fontSize = "11px";
     adPanel.style.color = "#0ff";
 
-    // 3) Build the content, now with a header bar + X button
+    // Build the content with header bar + X button
     adPanel.innerHTML = `
       <div style="
         display:flex;
@@ -146,7 +162,7 @@
           style="width:100%; display:block; border-radius:3px; border:1px solid #222;">
       </div>
 
-      <div style="margin-top:4px; text-align:center;">
+      <div style="margin-top:4px; text-align:center%;">
         <span style="color:#f0f;">Patreon:</span>
         <a href="https://www.patreon.com/hybridtales"
            target="_blank"
@@ -157,7 +173,7 @@
       </div>
     `;
 
-    // 4) Insert it *right after* the Send-to-Segment-Room button
+    // Insert it *right after* the gasket/segment chat send button
     const parent = anchor.parentElement || anchor;
     if (anchor.nextSibling) {
       parent.insertBefore(adPanel, anchor.nextSibling);
@@ -165,7 +181,7 @@
       parent.appendChild(adPanel);
     }
 
-    // 5) Wire the close (X) button to hide the panel
+    // Wire the close (X) button to hide the panel
     const closeBtn = adPanel.querySelector("#meqAdCloseBtn");
     if (closeBtn) {
       closeBtn.addEventListener("click", () => {
@@ -177,7 +193,7 @@
       });
     }
 
-    // 6) Set up video rotation
+    // Set up video rotation
     setupAdVideoRotation(adPanel);
   }
 
@@ -188,7 +204,7 @@
     injectAdPanel();
   }
 
-  // Optional: in case the full-chat UI is built dynamically *after* load,
-  // you can re-call this from your full-chat activator:
+  // Optional: in case the gasket chat UI is built dynamically *after* load,
+  // you can re-call this from your activator:
   window.MEQ_injectAds = injectAdPanel;
 })();
