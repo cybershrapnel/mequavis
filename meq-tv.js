@@ -4,6 +4,17 @@
 // - Random starting video
 // - Plays next video when current ends
 // - Destroys player/iframe on close and recreates on open
+// - Music Videos mode pulls videos.txt (tab-separated: title, mp3, mp4, author)
+//   * Random order, random start, no repeats until reshuffle
+//   * Autoplays audio+video when allowed
+//   * Auto-advances to next random entry when AUDIO finishes
+//   * Audio controls styled to match your dark player
+// - MODE TOGGLE:
+//   * Clicking "Music Videos" enters music mode AND button label changes to "Videos".
+//   * While label says "Videos", clicking it exits music mode and restores normal YouTube playback.
+//   * "View Videos":
+//       - In MV mode: overlays a scrollable MV playlist you can click to jump.
+//       - Otherwise: loads external iframe (xtdevelopment MTV).
 
 (function () {
   // 0) Read playlist from separate file
@@ -33,11 +44,10 @@
     if (!playlist.length) {
       shufflePlaylist();
     }
-    if (!playlist.length) return null; // still empty, nothing we can do
+    if (!playlist.length) return null;
 
     currentIndex++;
     if (currentIndex >= playlist.length) {
-      // Loop: reshuffle and start again
       shufflePlaylist();
       currentIndex = 0;
     }
@@ -48,7 +58,6 @@
   let tvBtn = document.querySelector('.action-btn[data-action="watch-tv"]');
 
   if (!tvBtn) {
-    // Fallback: locate by label text
     tvBtn = Array.from(document.querySelectorAll(".action-btn")).find((btn) =>
       btn.textContent.trim().toUpperCase().includes("WATCH AI CABLETV")
     );
@@ -59,10 +68,9 @@
     return;
   }
 
-  // Ensure label is correct
   tvBtn.textContent = "WATCH AI CABLE TV";
 
-  // 2) Create the TV panel (flex column so video fits)
+  // 2) Create the TV panel
   const panel = document.createElement("div");
   panel.id = "tvPanel";
   panel.style.cssText = `
@@ -77,8 +85,8 @@
     z-index: 999;
     padding: 0;
     box-sizing: border-box;
-    display: none;           /* we will set to flex in openPanel() */
-    flex-direction: column;  /* header + player container */
+    display: none;
+    flex-direction: column;
   `;
 
   panel.innerHTML = `
@@ -169,8 +177,13 @@
   // ---------------------------------------------------------------------------
   let player = null;
   let ytApiLoading = false;
-  let isExternalViewActive = false; // external iframe mode
-  let isMusicVideosMode = false;    // new music videos mode flag
+  let isExternalViewActive = false;
+  let isMusicVideosMode = false;
+
+  function updateMusicBtnLabel() {
+    if (!musicBtn) return;
+    musicBtn.textContent = isMusicVideosMode ? "Videos" : "Music Videos";
+  }
 
   function ensureYouTubeAPI(callback) {
     if (window.YT && typeof YT.Player === "function") {
@@ -185,7 +198,6 @@
       tag.src = "https://www.youtube.com/iframe_api";
       document.head.appendChild(tag);
 
-      // If another script already set onYouTubeIframeAPIReady, chain it
       const prev = window.onYouTubeIframeAPIReady;
       window._meqTvYTCallbacks = [];
 
@@ -193,11 +205,7 @@
         if (typeof prev === "function") prev();
         if (Array.isArray(window._meqTvYTCallbacks)) {
           window._meqTvYTCallbacks.forEach((cb) => {
-            try {
-              cb();
-            } catch (e) {
-              console.error("meq-tv.js callback error:", e);
-            }
+            try { cb(); } catch (e) { console.error("meq-tv.js callback error:", e); }
           });
           window._meqTvYTCallbacks.length = 0;
         }
@@ -211,10 +219,7 @@
   function createPlayer() {
     if (!rawList.length) return;
 
-    if (!playlist.length) {
-      shufflePlaylist();
-    }
-
+    if (!playlist.length) shufflePlaylist();
     const firstId = getNextVideoId();
     if (!firstId) return;
 
@@ -254,27 +259,21 @@
 
   function destroyPlayer() {
     if (player && typeof player.destroy === "function") {
-      try {
-        player.stopVideo();
-      } catch (e) {
-        // ignore if not ready
-      }
+      try { player.stopVideo(); } catch (e) {}
       player.destroy();
     }
     player = null;
 
     const container = document.getElementById(playerContainerId);
     if (container && !isMusicVideosMode && !isExternalViewActive) {
-      // only clear here if we're not about to overwrite container
       container.innerHTML = "";
     }
   }
 
   // ---------------------------------------------------------------------------
-  // 3.25) VIEW VIDEOS (load external site into the div via iframe)
+  // 3.25) VIEW VIDEOS external iframe (normal mode only)
   // ---------------------------------------------------------------------------
   function loadExternalVideoSite() {
-    // Kill the YouTube player and music mode if active
     destroyPlayer();
     exitMusicVideosMode();
 
@@ -289,11 +288,12 @@
       ></iframe>
     `;
 
-    isExternalViewActive = true; // mark that we're in external mode
+    isExternalViewActive = true;
+    updateMusicBtnLabel();
   }
 
   // ---------------------------------------------------------------------------
-  // 3.3) MUSIC VIDEOS MODE (videos.txt -> div with video + audio)
+  // 3.3) MUSIC VIDEOS MODE
   // ---------------------------------------------------------------------------
   let musicVideosList = [];      // { title, audioUrl, videoUrl, author }
   let currentMusicIndex = -1;
@@ -304,6 +304,9 @@
   // random order for music videos
   let musicOrder = [];
   let currentMusicOrderIndex = -1;
+
+  // overlay playlist state
+  let mvOverlayOpen = false;
 
   function shuffleMusicOrder() {
     musicOrder = musicVideosList.map((_, idx) => idx);
@@ -316,9 +319,8 @@
 
   function getNextMusicIndex() {
     if (!musicVideosList.length) return -1;
-    if (!musicOrder.length) {
-      shuffleMusicOrder();
-    }
+    if (!musicOrder.length) shuffleMusicOrder();
+
     currentMusicOrderIndex++;
     if (currentMusicOrderIndex >= musicOrder.length) {
       shuffleMusicOrder();
@@ -329,16 +331,12 @@
 
   function stopMusicVideoPlayback() {
     if (mvAudioEl) {
-      try {
-        mvAudioEl.pause();
-      } catch (e) {}
+      try { mvAudioEl.pause(); } catch (e) {}
       mvAudioEl.src = "";
       mvAudioEl = null;
     }
     if (mvVideoEl) {
-      try {
-        mvVideoEl.pause();
-      } catch (e) {}
+      try { mvVideoEl.pause(); } catch (e) {}
       mvVideoEl.src = "";
       mvVideoEl.load?.();
       mvVideoEl = null;
@@ -352,11 +350,13 @@
   function exitMusicVideosMode() {
     if (!isMusicVideosMode) return;
     isMusicVideosMode = false;
+    mvOverlayOpen = false;
     stopMusicVideoPlayback();
     const container = document.getElementById(playerContainerId);
     if (container && !isExternalViewActive) {
       container.innerHTML = "";
     }
+    updateMusicBtnLabel();
   }
 
   function parseVideosTxt(text) {
@@ -386,9 +386,7 @@
 
     fetch("videos.txt", { cache: "no-cache" })
       .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to load videos.txt");
-        }
+        if (!res.ok) throw new Error("Failed to load videos.txt");
         return res.text();
       })
       .then((text) => {
@@ -405,7 +403,158 @@
       });
   }
 
+  // Inject dark audio styling
+  function ensureMeqTvPlayerStyles() {
+    if (document.getElementById("meqTvPlayerStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "meqTvPlayerStyles";
+    style.textContent = `
+      #tvPanel #mvAudioHolder {
+        padding: 8px 10px !important;
+        background: #1e1e1e !important;
+        border-top: 1px solid #0ff !important;
+      }
+      #tvPanel audio#mvAudio {
+        width: 100% !important;
+        background: #2c2c2c !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 4px 0 !important;
+      }
+      #tvPanel audio#mvAudio::-webkit-media-controls-panel {
+        background-color: #2c2c2c !important;
+        color: #fff !important;
+      }
+      #tvPanel audio#mvAudio::-webkit-media-controls-play-button,
+      #tvPanel audio#mvAudio::-webkit-media-controls-pause-button,
+      #tvPanel audio#mvAudio::-webkit-media-controls-mute-button {
+        filter: invert(1);
+      }
+      #tvPanel audio#mvAudio::-webkit-media-controls-timeline {
+        background-color: #2c2c2c;
+      }
+      #tvPanel audio#mvAudio::-webkit-media-controls-current-time-display,
+      #tvPanel audio#mvAudio::-webkit-media-controls-time-remaining-display {
+        color: #ccc;
+      }
+      #tvPanel audio#mvAudio::-webkit-media-controls-volume-slider {
+        background-color: #444;
+        border-radius: 5px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // ----- MV PLAYLIST OVERLAY -----
+  function removeMusicOverlay() {
+    const container = document.getElementById(playerContainerId);
+    const overlay = container?.querySelector("#mvPlaylistOverlay");
+    if (overlay) overlay.remove();
+    mvOverlayOpen = false;
+  }
+
+  function buildMusicOverlay() {
+    const container = document.getElementById(playerContainerId);
+    if (!container) return;
+
+    // if already there, remove before rebuilding
+    const old = container.querySelector("#mvPlaylistOverlay");
+    if (old) old.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "mvPlaylistOverlay";
+    overlay.style.cssText = `
+      position:absolute;
+      inset:0;
+      background: rgba(0,0,0,0.92);
+      border-left:1px solid #0ff;
+      z-index: 50;
+      display:flex;
+      flex-direction:column;
+      font-family:monospace;
+      color:#0ff;
+    `;
+
+    overlay.innerHTML = `
+      <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        padding:6px 8px;
+        border-bottom:1px solid #0ff;
+        background:#050505;
+        font-size:12px;
+        flex:0 0 auto;
+      ">
+        <span>Music Videos Playlist</span>
+        <button id="mvOverlayClose" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">CLOSE</button>
+      </div>
+      <div id="mvOverlayList" style="
+        flex:1 1 auto;
+        overflow-y:auto;
+        padding:6px;
+      "></div>
+    `;
+
+    const listEl = overlay.querySelector("#mvOverlayList");
+    if (listEl) {
+      musicVideosList.forEach((entry, idx) => {
+        const row = document.createElement("div");
+        const isCurrent = idx === currentMusicIndex;
+        row.style.cssText = `
+          padding:6px 8px;
+          margin:2px 0;
+          border:1px solid ${isCurrent ? "#fff" : "#033"};
+          background:${isCurrent ? "#0aa" : "#000"};
+          color:${isCurrent ? "#000" : "#0ff"};
+          cursor:pointer;
+          font-size:12px;
+          white-space:nowrap;
+          overflow:hidden;
+          text-overflow:ellipsis;
+        `;
+        row.textContent = entry.title || `(untitled ${idx+1})`;
+row.addEventListener("click", () => {
+  // close overlay when picking a song
+  mvOverlayOpen = false;     // IMPORTANT: prevents renderMusicVideo from rebuilding it
+  currentMusicIndex = idx;
+  renderMusicVideo(currentMusicIndex);
+  removeMusicOverlay();     // safety (new DOM won't have it anyway)
+});
+
+        listEl.appendChild(row);
+      });
+    }
+
+    overlay.querySelector("#mvOverlayClose")?.addEventListener("click", removeMusicOverlay);
+
+    // attach to wrapper so it sits over the MV
+    const wrapper = container.querySelector("#musicVideoWrapper");
+    if (wrapper) {
+      wrapper.appendChild(overlay);
+      mvOverlayOpen = true;
+    }
+  }
+
+  function toggleMusicOverlay() {
+    if (!isMusicVideosMode) return;
+    if (mvOverlayOpen) removeMusicOverlay();
+    else buildMusicOverlay();
+  }
+
   function renderMusicVideo(index) {
+    ensureMeqTvPlayerStyles();
+    stopMusicVideoPlayback();
+
     const container = document.getElementById(playerContainerId);
     if (!container) return;
     const entry = musicVideosList[index];
@@ -413,6 +562,7 @@
 
     container.innerHTML = `
       <div id="musicVideoWrapper" style="
+        position:relative;
         display:flex;
         flex-direction:column;
         width:100%;
@@ -420,6 +570,7 @@
         background:#000;
         color:#0ff;
         font-family:monospace;
+        overflow:hidden;
       ">
         <div id="mvTitle" style="
           padding:4px 8px;
@@ -447,12 +598,8 @@
           opacity:0.8;
           border-top:1px solid #0ff;
         "></div>
-        <div id="mvAudioHolder" style="
-          padding:4px 8px;
-          background:#050505;
-          border-top:1px solid #0ff;
-        ">
-          <audio id="mvAudio" controls style="width:100%;"></audio>
+        <div id="mvAudioHolder">
+          <audio id="mvAudio" controls></audio>
         </div>
       </div>
     `;
@@ -462,30 +609,31 @@
     mvVideoEl      = container.querySelector("#mvVideo");
     mvAudioEl      = container.querySelector("#mvAudio");
 
-    if (titleEl) {
-      titleEl.textContent = entry.title || "";
-    }
-    if (authorEl) {
-      authorEl.textContent = entry.author || "";
-    }
+    if (titleEl) titleEl.textContent = entry.title || "";
+    if (authorEl) authorEl.textContent = entry.author || "";
 
     if (mvVideoEl) {
       mvVideoEl.src = entry.videoUrl;
       mvVideoEl.muted = true;
       mvVideoEl.loop = true;
       mvVideoEl.controls = false;
-      mvVideoEl.play().catch(() => {
-        // Autoplay might be blocked; that's fine.
-      });
+      mvVideoEl.play().catch(() => {});
     }
 
     if (mvAudioEl) {
       mvAudioEl.src = entry.audioUrl;
       mvAudioEl.controls = true;
-      mvAudioEl.play().catch(() => {
-        // User will need to press play if autoplay is blocked.
+      mvAudioEl.loop = false;
+
+      mvAudioEl.addEventListener("ended", () => {
+        if (isMusicVideosMode) playNextMusicVideo();
       });
+
+      mvAudioEl.play().catch(() => {});
     }
+
+    // if overlay was open, rebuild it on top of new DOM
+    if (mvOverlayOpen) buildMusicOverlay();
   }
 
   function startMusicVideosMode() {
@@ -512,7 +660,6 @@
       return;
     }
 
-    // random order + random start
     shuffleMusicOrder();
     const firstIndex = getNextMusicIndex();
     if (firstIndex === -1) return;
@@ -520,18 +667,17 @@
     isMusicVideosMode = true;
     isExternalViewActive = false;
     currentMusicIndex = firstIndex;
+    mvOverlayOpen = false;
     renderMusicVideo(currentMusicIndex);
+    updateMusicBtnLabel();
   }
 
   function enterMusicVideosMode() {
-    // leave other modes
     isExternalViewActive = false;
     destroyPlayer();
-    exitMusicVideosMode(); // makes sure any old audio/video are cleared
+    exitMusicVideosMode();
 
-    loadMusicVideosList(() => {
-      startMusicVideosMode();
-    });
+    loadMusicVideosList(() => startMusicVideosMode());
   }
 
   function playNextMusicVideo() {
@@ -551,14 +697,13 @@
   let poppedOut   = false;
 
   function onMouseDownHeader(e) {
-    if (!poppedOut) return; // only draggable in popout mode
+    if (!poppedOut) return;
     e.preventDefault();
     const rect = panel.getBoundingClientRect();
     isDragging = true;
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
 
-    // Ensure left/top mode for dragging
     panel.style.left   = rect.left + "px";
     panel.style.top    = rect.top + "px";
     panel.style.right  = "auto";
@@ -567,20 +712,15 @@
 
   function onMouseMove(e) {
     if (!isDragging) return;
-    const newLeft = e.clientX - dragOffsetX;
-    const newTop  = e.clientY - dragOffsetY;
-
-    panel.style.left = newLeft + "px";
-    panel.style.top  = newTop + "px";
+    panel.style.left = (e.clientX - dragOffsetX) + "px";
+    panel.style.top  = (e.clientY - dragOffsetY) + "px";
   }
 
   function onMouseUp() {
     isDragging = false;
   }
 
-  if (headerEl) {
-    headerEl.addEventListener("mousedown", onMouseDownHeader);
-  }
+  if (headerEl) headerEl.addEventListener("mousedown", onMouseDownHeader);
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 
@@ -600,41 +740,28 @@
     panel.style.bottom = "auto";
     panel.style.width  = newWidth + "px";
 
-    // base extra height is 100; music videos get +200 more
     let extraHeight = 100;
-    if (isMusicVideosMode) {
-      extraHeight += 200; // make popout about 200px taller than normal in music mode
-    }
+    if (isMusicVideosMode) extraHeight += 200;
     panel.style.height = newHeight + extraHeight + "px";
 
-    // 🔹 Remove the Popout button after use
     if (popoutBtn) {
       popoutBtn.style.display = "none";
       popoutBtn.disabled = true;
     }
-
-    // 🔹 Remove the View Videos button after popout
     if (viewBtn) {
       viewBtn.style.display = "none";
       viewBtn.disabled = true;
     }
-
-    // 🔹 Remove the Music Videos button after popout (only available when not popped out)
     if (musicBtn) {
       musicBtn.style.display = "none";
       musicBtn.disabled = true;
     }
   }
 
-  if (popoutBtn) {
-    popoutBtn.addEventListener("click", () => {
-      popoutPanel();
-    });
-  }
+  if (popoutBtn) popoutBtn.addEventListener("click", popoutPanel);
 
   // 4) Panel controls
   function openPanel() {
-    // Reset geometry each time we open (docked mode)
     panel.style.left   = "280px";
     panel.style.right  = "280px";
     panel.style.top    = "70px";
@@ -642,36 +769,29 @@
     panel.style.width  = "";
     panel.style.height = "";
     poppedOut = false;
+
     isExternalViewActive = false;
     exitMusicVideosMode();
 
-    // Restore Popout button on fresh open
     if (popoutBtn) {
       popoutBtn.style.display = "inline-block";
       popoutBtn.disabled = false;
     }
-
-    // Restore View Videos button on fresh open
     if (viewBtn) {
       viewBtn.style.display = "inline-block";
       viewBtn.disabled = false;
     }
-
-    // Restore Music Videos button on fresh open (only in non-popout mode)
     if (musicBtn) {
       musicBtn.style.display = "inline-block";
       musicBtn.disabled = false;
     }
 
-    // use flex so header + player container layout nicely
     panel.style.display = "flex";
 
-    // Fresh shuffle each time we open (optional – comment out if you want persistent order)
     shufflePlaylist();
 
-    ensureYouTubeAPI(() => {
-      createPlayer();
-    });
+    ensureYouTubeAPI(createPlayer);
+    updateMusicBtnLabel();
   }
 
   function closePanel() {
@@ -679,56 +799,63 @@
     isExternalViewActive = false;
     exitMusicVideosMode();
     destroyPlayer();
+    updateMusicBtnLabel();
   }
 
   // 5) Wire up button toggling
   tvBtn.addEventListener("click", () => {
-    if (panel.style.display === "flex") {
-      closePanel();
-    } else {
-      openPanel();
-    }
+    if (panel.style.display === "flex") closePanel();
+    else openPanel();
   });
 
-  if (closeBtn) {
-    closeBtn.addEventListener("click", closePanel);
-  }
+  if (closeBtn) closeBtn.addEventListener("click", closePanel);
 
   if (nextBtn) {
     nextBtn.addEventListener("click", () => {
       if (isMusicVideosMode) {
-        // In Music Videos mode: NEXT cycles through videos.txt entries (random order)
         playNextMusicVideo();
       } else if (isExternalViewActive) {
-        // If we're currently showing the external site, NEXT should restore YouTube
         const container = document.getElementById(playerContainerId);
-        if (container) {
-          container.innerHTML = ""; // remove iframe
-        }
+        if (container) container.innerHTML = "";
         isExternalViewActive = false;
-
-        ensureYouTubeAPI(() => {
-          createPlayer();
-        });
+        ensureYouTubeAPI(createPlayer);
       } else {
-        // Normal behavior: go to next YouTube video
         playNextVideo();
       }
+      updateMusicBtnLabel();
     });
   }
 
   if (viewBtn) {
     viewBtn.addEventListener("click", () => {
-      loadExternalVideoSite();
+      if (isMusicVideosMode) {
+        // MV mode = overlay playlist
+        toggleMusicOverlay();
+      } else {
+        // normal mode = external iframe
+        loadExternalVideoSite();
+      }
     });
   }
 
   if (musicBtn) {
     musicBtn.addEventListener("click", () => {
-      enterMusicVideosMode();
+      if (isMusicVideosMode) {
+        // "Videos" -> go back to YouTube
+        exitMusicVideosMode();
+        isExternalViewActive = false;
+
+        const container = document.getElementById(playerContainerId);
+        if (container) container.innerHTML = "";
+
+        ensureYouTubeAPI(createPlayer);
+      } else {
+        // "Music Videos" -> enter MV mode
+        enterMusicVideosMode();
+      }
+      updateMusicBtnLabel();
     });
   }
 
-  // Optional: safety on unload
   // window.addEventListener("beforeunload", destroyPlayer);
 })();
