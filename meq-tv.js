@@ -1,5 +1,5 @@
 // meq-tv.js
-// WATCH AI CABLE TV panel with YouTube playlist support.
+// WATCH AI CABLE TV panel with YouTube playlist support + Music Videos mode.
 // - Uses global window.MEQ_TV_VIDEO_IDS from meq-tv-videos.js
 // - Random starting video
 // - Plays next video when current ends
@@ -105,6 +105,15 @@
           padding:2px 8px;
           cursor:pointer;
         ">View Videos</button>
+        <button id="tvPanelMusicVideos" style="
+          background:#111;
+          color:#0ff;
+          border:1px solid #0ff;
+          font-family:monospace;
+          font-size:11px;
+          padding:2px 8px;
+          cursor:pointer;
+        ">Music Videos</button>
         <button id="tvPanelNext" style="
           background:#111;
           color:#0ff;
@@ -152,12 +161,16 @@
   const nextBtn           = panel.querySelector("#tvPanelNext");
   const popoutBtn         = panel.querySelector("#tvPanelPopout");
   const viewBtn           = panel.querySelector("#tvPanelView");
+  const musicBtn          = panel.querySelector("#tvPanelMusicVideos");
   const playerContainerId = "tvPlayerContainer";
 
+  // ---------------------------------------------------------------------------
   // 3) YouTube IFrame API loader & player
+  // ---------------------------------------------------------------------------
   let player = null;
   let ytApiLoading = false;
-  let isExternalViewActive = false; // ← new flag
+  let isExternalViewActive = false; // external iframe mode
+  let isMusicVideosMode = false;    // new music videos mode flag
 
   function ensureYouTubeAPI(callback) {
     if (window.YT && typeof YT.Player === "function") {
@@ -251,17 +264,19 @@
     player = null;
 
     const container = document.getElementById(playerContainerId);
-    if (container) {
+    if (container && !isMusicVideosMode && !isExternalViewActive) {
+      // only clear here if we're not about to overwrite container
       container.innerHTML = "";
     }
   }
 
   // ---------------------------------------------------------------------------
-  // 3.25) VIEW VIDEOS (load external site into the div)
+  // 3.25) VIEW VIDEOS (load external site into the div via iframe)
   // ---------------------------------------------------------------------------
   function loadExternalVideoSite() {
-    // Kill the YouTube player if active
+    // Kill the YouTube player and music mode if active
     destroyPlayer();
+    exitMusicVideosMode();
 
     const container = document.getElementById(playerContainerId);
     if (!container) return;
@@ -275,6 +290,256 @@
     `;
 
     isExternalViewActive = true; // mark that we're in external mode
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3.3) MUSIC VIDEOS MODE (videos.txt -> div with video + audio)
+  // ---------------------------------------------------------------------------
+  let musicVideosList = [];      // { title, audioUrl, videoUrl, author }
+  let currentMusicIndex = -1;
+  let musicVideosLoaded = false;
+  let mvAudioEl = null;
+  let mvVideoEl = null;
+
+  // random order for music videos
+  let musicOrder = [];
+  let currentMusicOrderIndex = -1;
+
+  function shuffleMusicOrder() {
+    musicOrder = musicVideosList.map((_, idx) => idx);
+    for (let i = musicOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [musicOrder[i], musicOrder[j]] = [musicOrder[j], musicOrder[i]];
+    }
+    currentMusicOrderIndex = -1;
+  }
+
+  function getNextMusicIndex() {
+    if (!musicVideosList.length) return -1;
+    if (!musicOrder.length) {
+      shuffleMusicOrder();
+    }
+    currentMusicOrderIndex++;
+    if (currentMusicOrderIndex >= musicOrder.length) {
+      shuffleMusicOrder();
+      currentMusicOrderIndex = 0;
+    }
+    return musicOrder[currentMusicOrderIndex];
+  }
+
+  function stopMusicVideoPlayback() {
+    if (mvAudioEl) {
+      try {
+        mvAudioEl.pause();
+      } catch (e) {}
+      mvAudioEl.src = "";
+      mvAudioEl = null;
+    }
+    if (mvVideoEl) {
+      try {
+        mvVideoEl.pause();
+      } catch (e) {}
+      mvVideoEl.src = "";
+      mvVideoEl.load?.();
+      mvVideoEl = null;
+    }
+    const container = document.getElementById(playerContainerId);
+    if (container && isMusicVideosMode === false && !isExternalViewActive && !player) {
+      container.innerHTML = "";
+    }
+  }
+
+  function exitMusicVideosMode() {
+    if (!isMusicVideosMode) return;
+    isMusicVideosMode = false;
+    stopMusicVideoPlayback();
+    const container = document.getElementById(playerContainerId);
+    if (container && !isExternalViewActive) {
+      container.innerHTML = "";
+    }
+  }
+
+  function parseVideosTxt(text) {
+    const lines = text.split(/\r?\n/);
+    const items = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split("\t");
+      if (parts.length < 4) continue;
+      const [title, audioUrl, videoUrl, author] = parts;
+      items.push({
+        title: title.trim(),
+        audioUrl: audioUrl.trim(),
+        videoUrl: videoUrl.trim(),
+        author: author.trim()
+      });
+    }
+    return items;
+  }
+
+  function loadMusicVideosList(callback) {
+    if (musicVideosLoaded) {
+      if (typeof callback === "function") callback();
+      return;
+    }
+
+    fetch("videos.txt", { cache: "no-cache" })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error("Failed to load videos.txt");
+        }
+        return res.text();
+      })
+      .then((text) => {
+        musicVideosList = parseVideosTxt(text);
+        musicVideosLoaded = true;
+        if (!musicVideosList.length) {
+          console.warn("meq-tv.js: videos.txt is empty or malformed.");
+        }
+        if (typeof callback === "function") callback();
+      })
+      .catch((err) => {
+        console.error("meq-tv.js: Error loading videos.txt:", err);
+        if (typeof callback === "function") callback();
+      });
+  }
+
+  function renderMusicVideo(index) {
+    const container = document.getElementById(playerContainerId);
+    if (!container) return;
+    const entry = musicVideosList[index];
+    if (!entry) return;
+
+    container.innerHTML = `
+      <div id="musicVideoWrapper" style="
+        display:flex;
+        flex-direction:column;
+        width:100%;
+        height:100%;
+        background:#000;
+        color:#0ff;
+        font-family:monospace;
+      ">
+        <div id="mvTitle" style="
+          padding:4px 8px;
+          font-size:14px;
+          font-weight:bold;
+          border-bottom:1px solid #0ff;
+        "></div>
+        <div id="mvVideoHolder" style="
+          flex:1 1 auto;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          overflow:hidden;
+        ">
+          <video id="mvVideo" style="
+            width:100%;
+            height:100%;
+            object-fit:cover;
+            display:block;
+          " muted loop playsinline></video>
+        </div>
+        <div id="mvAuthor" style="
+          padding:4px 8px;
+          font-size:12px;
+          opacity:0.8;
+          border-top:1px solid #0ff;
+        "></div>
+        <div id="mvAudioHolder" style="
+          padding:4px 8px;
+          background:#050505;
+          border-top:1px solid #0ff;
+        ">
+          <audio id="mvAudio" controls style="width:100%;"></audio>
+        </div>
+      </div>
+    `;
+
+    const titleEl  = container.querySelector("#mvTitle");
+    const authorEl = container.querySelector("#mvAuthor");
+    mvVideoEl      = container.querySelector("#mvVideo");
+    mvAudioEl      = container.querySelector("#mvAudio");
+
+    if (titleEl) {
+      titleEl.textContent = entry.title || "";
+    }
+    if (authorEl) {
+      authorEl.textContent = entry.author || "";
+    }
+
+    if (mvVideoEl) {
+      mvVideoEl.src = entry.videoUrl;
+      mvVideoEl.muted = true;
+      mvVideoEl.loop = true;
+      mvVideoEl.controls = false;
+      mvVideoEl.play().catch(() => {
+        // Autoplay might be blocked; that's fine.
+      });
+    }
+
+    if (mvAudioEl) {
+      mvAudioEl.src = entry.audioUrl;
+      mvAudioEl.controls = true;
+      mvAudioEl.play().catch(() => {
+        // User will need to press play if autoplay is blocked.
+      });
+    }
+  }
+
+  function startMusicVideosMode() {
+    if (!musicVideosList.length) {
+      const container = document.getElementById(playerContainerId);
+      if (container) {
+        container.innerHTML = `
+          <div style="
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            width:100%;
+            height:100%;
+            background:#000;
+            color:#f55;
+            font-family:monospace;
+            padding:16px;
+            text-align:center;
+          ">
+            Unable to load music videos. Check videos.txt on the server.
+          </div>
+        `;
+      }
+      return;
+    }
+
+    // random order + random start
+    shuffleMusicOrder();
+    const firstIndex = getNextMusicIndex();
+    if (firstIndex === -1) return;
+
+    isMusicVideosMode = true;
+    isExternalViewActive = false;
+    currentMusicIndex = firstIndex;
+    renderMusicVideo(currentMusicIndex);
+  }
+
+  function enterMusicVideosMode() {
+    // leave other modes
+    isExternalViewActive = false;
+    destroyPlayer();
+    exitMusicVideosMode(); // makes sure any old audio/video are cleared
+
+    loadMusicVideosList(() => {
+      startMusicVideosMode();
+    });
+  }
+
+  function playNextMusicVideo() {
+    if (!isMusicVideosMode || !musicVideosList.length) return;
+    const nextIndex = getNextMusicIndex();
+    if (nextIndex === -1) return;
+    currentMusicIndex = nextIndex;
+    renderMusicVideo(currentMusicIndex);
   }
 
   // ---------------------------------------------------------------------------
@@ -334,7 +599,13 @@
     panel.style.right  = "auto";
     panel.style.bottom = "auto";
     panel.style.width  = newWidth + "px";
-    panel.style.height = newHeight + 100 + "px";
+
+    // base extra height is 100; music videos get +200 more
+    let extraHeight = 100;
+    if (isMusicVideosMode) {
+      extraHeight += 200; // make popout about 200px taller than normal in music mode
+    }
+    panel.style.height = newHeight + extraHeight + "px";
 
     // 🔹 Remove the Popout button after use
     if (popoutBtn) {
@@ -342,10 +613,16 @@
       popoutBtn.disabled = true;
     }
 
-    // 🔹 Also remove the View Videos button after popout
+    // 🔹 Remove the View Videos button after popout
     if (viewBtn) {
       viewBtn.style.display = "none";
       viewBtn.disabled = true;
+    }
+
+    // 🔹 Remove the Music Videos button after popout (only available when not popped out)
+    if (musicBtn) {
+      musicBtn.style.display = "none";
+      musicBtn.disabled = true;
     }
   }
 
@@ -366,6 +643,7 @@
     panel.style.height = "";
     poppedOut = false;
     isExternalViewActive = false;
+    exitMusicVideosMode();
 
     // Restore Popout button on fresh open
     if (popoutBtn) {
@@ -377,6 +655,12 @@
     if (viewBtn) {
       viewBtn.style.display = "inline-block";
       viewBtn.disabled = false;
+    }
+
+    // Restore Music Videos button on fresh open (only in non-popout mode)
+    if (musicBtn) {
+      musicBtn.style.display = "inline-block";
+      musicBtn.disabled = false;
     }
 
     // use flex so header + player container layout nicely
@@ -392,8 +676,9 @@
 
   function closePanel() {
     panel.style.display = "none";
-    destroyPlayer();
     isExternalViewActive = false;
+    exitMusicVideosMode();
+    destroyPlayer();
   }
 
   // 5) Wire up button toggling
@@ -411,8 +696,11 @@
 
   if (nextBtn) {
     nextBtn.addEventListener("click", () => {
-      // If we're currently showing the external site, NEXT should restore YouTube
-      if (isExternalViewActive) {
+      if (isMusicVideosMode) {
+        // In Music Videos mode: NEXT cycles through videos.txt entries (random order)
+        playNextMusicVideo();
+      } else if (isExternalViewActive) {
+        // If we're currently showing the external site, NEXT should restore YouTube
         const container = document.getElementById(playerContainerId);
         if (container) {
           container.innerHTML = ""; // remove iframe
@@ -420,7 +708,6 @@
         isExternalViewActive = false;
 
         ensureYouTubeAPI(() => {
-          // You can optionally reshuffle here; createPlayer() already picks a random starting video
           createPlayer();
         });
       } else {
@@ -433,6 +720,12 @@
   if (viewBtn) {
     viewBtn.addEventListener("click", () => {
       loadExternalVideoSite();
+    });
+  }
+
+  if (musicBtn) {
+    musicBtn.addEventListener("click", () => {
+      enterMusicVideosMode();
     });
   }
 
