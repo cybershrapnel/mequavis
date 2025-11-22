@@ -870,7 +870,7 @@
           traversalTarget = bestSmallWheel;
           traversalLabel = bestSmallWheel.label || null;
         }
-      } else {
+            } else {
         // B: Normal behavior (OMEGA unlocked)
         let closest = null;
         let bestDist = Infinity;
@@ -915,7 +915,16 @@
         }
 
         traversalLabel = traversalStickyLabel;
+
+        // --- FIX: break the small-wheel streak when we're not on a small nofur ---
+        // If Eye Link 1 is *not* currently targeting a small nofur wheel, we
+        // clear lastTraverseNodeKey so that coming back to the same small
+        // (after a big in between) counts as a fresh hit.
+        if (!traversalTarget) {
+          lastTraverseNodeKey = null;
+        }
       }
+
 
       // === Draw lines ===
 
