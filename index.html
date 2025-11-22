@@ -1056,6 +1056,11 @@ function drawTitle() {
 
   // 🔹 Display is always baseDigit prepended
   const addressDisplay = baseDigit + core;
+  // 🔹 EXPOSE THIS TO THE WORLD FOR THE SEEKER EYE
+  window.omniverseNumber     = addressDisplay;  // existing
+  window.gasketCurrent       = gasket;         // ✅ new
+  window.gasketPowerCurrent  = gasketPower;    // ✅ new
+  window.segmentCurrent      = segment;        // ✅ new
 
   // Gasket display: first pass = "Gasket 1", later wraps = "Gasket 1^2", etc.
   const gasketLabel = gasketPower === 1
