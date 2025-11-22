@@ -1,14 +1,21 @@
 // meq-room-chat.js
-// Segment-based room chat that appears in the main AI output area.
+// Gasket Power–based room chat that appears in the main AI output area.
 // Uses chat.php on your server and does NOT modify meq-chat.js.
+//
+// Behavior:
+//  - We DO NOT look at #segmentLog at all.
+//  - We DO NOT require any changes to the main script.
+//  - We read the existing global "gasketPower" that your title logic already uses.
+//  - Room key = "GASKET_POWER_<gasketPower>".
+//  - Header text = "Gasket Power Chat <gasketPower>".
 
 (function () {
   const ROOM_API_URL = "https://xtdevelopment.net/chat-proxy/chat.php";
 
-  let currentRoomId      = null;  // UUID from server for this segment address
-  let lastSegmentAddress = null;  // raw address string from #segmentLog
-  let lastPollIndex      = 0;     // index for incremental polling
-  let pollTimerId        = null;
+  let currentRoomId     = null;  // UUID from server for this gasket power
+  let lastGasketKey     = null;  // "GASKET_POWER_1", "GASKET_POWER_2", ...
+  let lastPollIndex     = 0;     // index for incremental polling
+  let pollTimerId       = null;
 
   // DOM refs
   let headerEl        = null;
@@ -16,20 +23,18 @@
   let messageInputEl  = null;
   let sendBtnEl       = null;
 
-  // --- NEW: cooldown state for anti-spam ------------------------------------
-  const SEND_COOLDOWN_SECONDS = 60;
-  let sendCooldownActive      = false;
-  let sendCooldownRemaining   = 0;
-  let sendCooldownTimerId     = null;
-  const SEND_BTN_DEFAULT_LABEL = "Send to Segment Room";
+  // --- SEND cooldown state for anti-spam ------------------------------------
+  const SEND_COOLDOWN_SECONDS   = 60;
+  let sendCooldownActive        = false;
+  let sendCooldownRemaining     = 0;
+  let sendCooldownTimerId       = null;
+  const SEND_BTN_DEFAULT_LABEL  = "Send to Gasket Power Chat";
 
   // ---------------------------------------------------------------------------
   // UTIL: append to main chat using existing formatter
   // ---------------------------------------------------------------------------
   function appendToMainChat(sender, text) {
     if (typeof window.appendAIMessage === "function") {
-      // meq-chat.js will classify this: "System" stays visible, any other name
-      // becomes .msg-user and is controlled by "Hide User Chat".
       window.appendAIMessage(sender, text);
     } else {
       console.log(sender + ":", text);
@@ -37,61 +42,58 @@
   }
 
   // ---------------------------------------------------------------------------
-  // SEGMENT ADDRESS → SINGLE STRING
+  // GASKET POWER HELPERS
   // ---------------------------------------------------------------------------
-  function getSegmentAddress() {
-    const segLog = document.getElementById("segmentLog");
-    if (!segLog) {
-      return ""; // no segments / base
+
+  // Read current gasketPower from the global script.
+  // Your inline script already has:
+  //   let gasket = 1;
+  //   let gasketPower = 1;
+  function getGasketPower() {
+    if (typeof gasketPower === "number" && isFinite(gasketPower) && gasketPower > 0) {
+      return Math.floor(gasketPower);
     }
+    // Fallback if something weird happens
+    return 1;
+  }
 
-    const raw = segLog.textContent || "";
-    const trimmed = raw.replace(/\s+/g, " ").trim();
+  // Logical room key for the current gasket power.
+  // This is the ONLY thing we send to chat.php as "segment_address".
+  function getGasketAddressKey() {
+    const gp = getGasketPower();
+    return "GASKET_POWER_" + gp;
+  }
 
-    // If nothing useful, treat as base
-    return trimmed;
+  // Human-readable header label
+  function getGasketHeaderLabel() {
+    const gp = getGasketPower();
+    return "Gasket Power Chat " + gp;
   }
 
   // ---------------------------------------------------------------------------
-  // HEADER TEXT: show current UUID
+  // HEADER TEXT
   // ---------------------------------------------------------------------------
-  function updateSegmentRoomHeader() {
+  function updateGasketRoomHeader() {
     if (!headerEl) return;
-
-    if (currentRoomId) {
-      headerEl.textContent = "Segment Room Chat " + currentRoomId;
-    } else {
-      headerEl.textContent = "Segment Room Chat (base)";
-    }
+    headerEl.textContent = getGasketHeaderLabel();
   }
 
   // ---------------------------------------------------------------------------
-  // ROOM MAPPING: segment address → room UUID (handled by chat.php)
+  // ROOM MAPPING: gasket power → room UUID (handled by chat.php)
   // ---------------------------------------------------------------------------
   async function ensureRoomMapping() {
-    const segAddress = getSegmentAddress();
+    const gasketKey = getGasketAddressKey();
 
-    // If no address, we’re effectively in base / lobby
-    if (!segAddress) {
-      if (currentRoomId !== null) {
-        currentRoomId = null;
-        lastPollIndex = 0;
-        updateSegmentRoomHeader();
-      }
-      lastSegmentAddress = "";
+    // If gasket power key unchanged and we already have a room, nothing to do.
+    if (gasketKey === lastGasketKey && currentRoomId) {
+      updateGasketRoomHeader(); // keep header synced
       return;
     }
 
-    // If address unchanged and we already have a room, nothing to do
-    if (segAddress === lastSegmentAddress && currentRoomId) {
-      return;
-    }
-
-    // Address changed or first time
-    lastSegmentAddress = segAddress;
-    currentRoomId      = null;
-    lastPollIndex      = 0;
-    updateSegmentRoomHeader();
+    lastGasketKey = gasketKey;
+    currentRoomId = null;
+    lastPollIndex = 0;
+    updateGasketRoomHeader();
 
     try {
       const res = await fetch(ROOM_API_URL, {
@@ -99,13 +101,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "map_segment",
-          segment_address: segAddress
+          segment_address: gasketKey    // <-- ONLY this key now
         })
       });
 
       if (!res.ok) {
         console.error("map_segment HTTP error", res.status);
-        appendToMainChat("System", "Segment room mapping failed (" + res.status + ").");
+        appendToMainChat("System", "Gasket power room mapping failed (" + res.status + ").");
         return;
       }
 
@@ -113,7 +115,7 @@
       currentRoomId = data.room_id || null;
 
       if (!currentRoomId) {
-        appendToMainChat("System", "Segment room mapping returned no room_id.");
+        appendToMainChat("System", "Gasket power room mapping returned no room_id.");
       }
 
       if (typeof data.next_index === "number") {
@@ -122,15 +124,15 @@
         lastPollIndex = 0;
       }
 
-      updateSegmentRoomHeader();
+      updateGasketRoomHeader();
     } catch (err) {
       console.error("map_segment exception", err);
-      appendToMainChat("System", "Error mapping segment room: " + err.message);
+      appendToMainChat("System", "Error mapping gasket power room: " + err.message);
     }
   }
 
   // ---------------------------------------------------------------------------
-  // NEW: SEND BUTTON COOLDOWN LOGIC
+  // SEND BUTTON COOLDOWN LOGIC
   // ---------------------------------------------------------------------------
   function startSendCooldown() {
     if (!sendBtnEl) return;
@@ -138,8 +140,7 @@
     sendCooldownActive    = true;
     sendCooldownRemaining = SEND_COOLDOWN_SECONDS;
 
-    // Disable button and start countdown
-    sendBtnEl.disabled    = true;
+    sendBtnEl.disabled      = true;
     sendBtnEl.style.opacity = "0.6";
     sendBtnEl.style.cursor  = "default";
     sendBtnEl.textContent   = "Send (" + sendCooldownRemaining + ")";
@@ -188,11 +189,11 @@
     // Start cooldown as soon as user actually sends something
     startSendCooldown();
 
-    // Make sure we’re mapped to the correct current segment
+    // Make sure we’re mapped to the correct current gasket power room
     await ensureRoomMapping();
 
     if (!currentRoomId) {
-      appendToMainChat("System", "No active segment room; message not sent.");
+      appendToMainChat("System", "No active gasket power room; message not sent.");
       return;
     }
 
@@ -204,7 +205,7 @@
 
     // Persist username
     try {
-      window.localStorage.setItem("meqSegmentChatUsername", username);
+      window.localStorage.setItem("meqGasketChatUsername", username);
     } catch (_e) {}
 
     // Send to server
@@ -213,16 +214,16 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action:  "post_message",
-          room_id: currentRoomId,
+          action:   "post_message",
+          room_id:  currentRoomId,
           username: username,
-          text:    text
+          text:     text
         })
       });
 
       if (!res.ok) {
         console.error("post_message HTTP error", res.status);
-        appendToMainChat("System", "Segment room send failed (" + res.status + ").");
+        appendToMainChat("System", "Gasket power room send failed (" + res.status + ").");
         return;
       }
 
@@ -234,7 +235,7 @@
       }
     } catch (err) {
       console.error("post_message exception", err);
-      appendToMainChat("System", "Error sending to segment room: " + err.message);
+      appendToMainChat("System", "Error sending to gasket power room: " + err.message);
     }
   }
 
@@ -244,7 +245,7 @@
   async function pollRoomMessages() {
     pollTimerId = null;
 
-    // Re-check which segment we’re in each poll (so it updates when you change segments)
+    // Re-check which gasket power we’re in each poll
     await ensureRoomMapping();
 
     if (!currentRoomId) {
@@ -297,37 +298,37 @@
   }
 
   // ---------------------------------------------------------------------------
-  // UI: ADD SEGMENT ROOM BLOCK INSIDE #chatInfoPanel
+  // UI: ADD GASKET POWER ROOM BLOCK INSIDE #chatInfoPanel
   // ---------------------------------------------------------------------------
-  function createSegmentRoomUI(chatInfoPanel) {
+  function createGasketRoomUI(chatInfoPanel) {
     const chatInfoContent =
       chatInfoPanel.querySelector("#chatInfoContent") || chatInfoPanel;
 
     const block = document.createElement("div");
-    block.id = "segmentRoomChatBlock";
+    block.id = "gasketRoomChatBlock";
     block.style.marginTop = "8px";
     block.style.borderTop = "1px solid #222";
     block.style.paddingTop = "6px";
     block.style.fontSize = "10px";
 
     block.innerHTML = ''
-      + '<h3 id="segmentRoomHeader"'
+      + '<h3 id="gasketRoomHeader"'
       + '    style="margin:0 0 4px 0;font-size:11px;color:#0ff;">'
-      + '  Segment Room Chat (base)'
+      + '  Gasket Power Chat 1'
       + '</h3>'
       + '<label style="font-size:10px;display:block;margin-top:4px;">'
       + '  Username:'
-      + '  <input type="text" id="segmentRoomUsername"'
+      + '  <input type="text" id="gasketRoomUsername"'
       + '         style="width:100%;box-sizing:border-box;font-size:10px;'
       + '                background:#050505;border:1px solid #0ff;color:#0ff;'
       + '                border-radius:3px;padding:2px 4px;">'
       + '</label>'
-      + '<textarea id="segmentRoomInput"'
+      + '<textarea id="gasketRoomInput"'
       + '          style="width:100%;height:60px;box-sizing:border-box;margin-top:4px;'
       + '                 background:#050505;border:1px solid #0ff;color:#0ff;'
       + '                 font-family:monospace;font-size:10px;border-radius:3px;'
       + '                 padding:2px 4px;"></textarea>'
-      + '<button id="segmentRoomSendBtn"'
+      + '<button id="gasketRoomSendBtn"'
       + '        style="margin-top:4px;width:100%;padding:4px;font-size:10px;'
       + '               background:#111;border:1px solid #0ff;color:#0ff;'
       + '               border-radius:3px;cursor:pointer;">'
@@ -336,14 +337,14 @@
 
     chatInfoContent.appendChild(block);
 
-    headerEl        = block.querySelector("#segmentRoomHeader");
-    usernameInputEl = block.querySelector("#segmentRoomUsername");
-    messageInputEl  = block.querySelector("#segmentRoomInput");
-    sendBtnEl       = block.querySelector("#segmentRoomSendBtn");
+    headerEl        = block.querySelector("#gasketRoomHeader");
+    usernameInputEl = block.querySelector("#gasketRoomUsername");
+    messageInputEl  = block.querySelector("#gasketRoomInput");
+    sendBtnEl       = block.querySelector("#gasketRoomSendBtn");
 
     // Restore saved username if present
     try {
-      const stored = window.localStorage.getItem("meqSegmentChatUsername");
+      const stored = window.localStorage.getItem("meqGasketChatUsername");
       if (stored && usernameInputEl) {
         usernameInputEl.value = stored;
       }
@@ -364,7 +365,7 @@
       });
     }
 
-    updateSegmentRoomHeader();
+    updateGasketRoomHeader();
   }
 
   // ---------------------------------------------------------------------------
@@ -377,7 +378,7 @@
       return;
     }
 
-    createSegmentRoomUI(panel);
+    createGasketRoomUI(panel);
 
     // Initial mapping + start polling
     ensureRoomMapping().then(function () {
@@ -385,6 +386,18 @@
         scheduleNextPoll();
       }
     });
+
+    // Heartbeat: if gasketPower changes in the main script, remap room + update header.
+    let lastLabel = getGasketHeaderLabel();
+    setInterval(() => {
+      const lbl = getGasketHeaderLabel();
+      if (lbl !== lastLabel) {
+        lastLabel = lbl;
+        ensureRoomMapping();
+      } else {
+        updateGasketRoomHeader();
+      }
+    }, 1000);
   }
 
   if (document.readyState === "loading") {
@@ -396,7 +409,8 @@
   // Debug handle if you want it in console
   window.MeqSegmentChat = {
     getCurrentRoomId: function () { return currentRoomId; },
-    getSegmentAddress: getSegmentAddress,
-    forceRemap: ensureRoomMapping
+    getGasketPower:   getGasketPower,
+    getGasketKey:     getGasketAddressKey,
+    forceRemap:       ensureRoomMapping
   };
 })();
