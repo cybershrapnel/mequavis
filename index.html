@@ -1067,11 +1067,16 @@ function drawTitle() {
     ? `Gasket ${gasket}`
     : `Gasket ${gasket}^${gasketPower}`;
 
+  const zoneNum = (typeof window._meqFractalSection === "number")
+    ? window._meqFractalSection
+    : 1;
+
   ctx.fillText(
-    `${gasketLabel} • Segment ${segment} • Layer ${currentLayer} • Omniverse ${addressDisplay}`,
+    `Zone ${zoneNum} • ${gasketLabel} • Segment ${segment} • Layer ${currentLayer} • Omniverse ${addressDisplay}`,
     center.x,
     50
   );
+
 }
 
 
@@ -1100,77 +1105,6 @@ function connectNofurs(parent, leftChild, rightChild) {
   ctx.restore();
 }
 
-// === Draw Sierpinski fractal inside a red box ===
-function drawSierpinskiBox() {
-  const boxWidth = 250;
-  const boxHeight = 250;
-  const boxX = center.x - boxWidth / 2;
-  const boxY = center.y - 380; // positioned above the middle nofur
-
-  // Outline box
-  ctx.strokeStyle = "#ff0000";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-
-  // Recursive triangle fractal inside the box
-  function drawSierpinski(x1, y1, x2, y2, x3, y3, depth) {
-    if (depth <= 0) {
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.lineTo(x3, y3);
-      ctx.closePath();
-      ctx.stroke();
-      return;
-    }
-    const mx1 = (x1 + x2) / 2, my1 = (y1 + y2) / 2;
-    const mx2 = (x2 + x3) / 2, my2 = (y2 + y3) / 2;
-    const mx3 = (x3 + x1) / 2, my3 = (y3 + y1) / 2;
-    drawSierpinski(x1, y1, mx1, my1, mx3, my3, depth - 1);
-    drawSierpinski(mx1, my1, x2, y2, mx2, my2, depth - 1);
-    drawSierpinski(mx3, my3, mx2, my2, x3, y3, depth - 1);
-  }
-
-  // Define the base triangle inside the box
-  const margin = 20;
-  const x1 = boxX + margin;
-  const y1 = boxY + boxHeight - margin;   // bottom-left
-  const x2 = boxX + boxWidth - margin;
-  const y2 = boxY + boxHeight - margin;   // bottom-right
-  const x3 = boxX + boxWidth / 2;
-  const y3 = boxY + margin;               // top
-
-  ctx.strokeStyle = "#ff0000";
-  drawSierpinski(x1, y1, x2, y2, x3, y3, 4);
-
-  // === Green "segment position" line ===
-  // Segment 1 = top of triangle, Segment 17 = bottom
-  const maxSeg = pyramidLayers; // 17 in your current setup
-  const segClamped = Math.max(1, Math.min(segment, maxSeg));
-  const t = (segClamped - 1) / (maxSeg - 1); // 0 → top, 1 → bottom
-
-  // Interpolate vertical position between top (y3) and bottom (y1)
-  const yLine = y3 + t * (y1 - y3);
-
-  // Find intersection with left and right edges of the triangle
-  // Left edge: (x3,y3) → (x1,y1)
-  // Right edge: (x3,y3) → (x2,y2)
-  function interpX(xA, yA, xB, yB, y) {
-    // linear interpolation along edge for a given y
-    const ratio = (y - yA) / (yB - yA);
-    return xA + ratio * (xB - xA);
-  }
-
-  const xLeft  = interpX(x3, y3, x1, y1, yLine);
-  const xRight = interpX(x3, y3, x2, y2, yLine);
-
-  ctx.strokeStyle = "#00ff00";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(xLeft, yLine);
-  ctx.lineTo(xRight, yLine);
-  ctx.stroke();
-}
 
 
 // === Pyramid Stack System ===
@@ -1272,7 +1206,9 @@ function animate(){
   smallRot += layerSpeed;
 
   drawTitle();
-  drawSierpinskiBox();
+if (typeof window.drawSierpinskiBox === "function") {
+  window.drawSierpinskiBox();
+}
   drawPyramidStack();
 
   const alphaTop = { x: center.x - 300, y: center.y - 235 };
@@ -1357,6 +1293,7 @@ animate();
 
 document.getElementById("layoutBtn").addEventListener("click",()=>{ compact = !compact; });
 </script>
+<script src="meq-fractal-zone.js"></script>
 <script src="meq-mandel.js"></script>
 <script src="meq-eyeball.js"></script>
 <script src="meq-tv-videos.js"></script>
