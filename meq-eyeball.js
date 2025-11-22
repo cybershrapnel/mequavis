@@ -77,6 +77,63 @@
   };
 
   // ---------------------------------------------------------------------------
+  // ANTI/INVERT MODE DETECTION + COLOR INVERSION (DISPLAY ONLY)
+  // ---------------------------------------------------------------------------
+
+  function isAntiModeActive() {
+    // Prefer explicit flags if you set one elsewhere
+    if (window._meqFractalAntiMode) return true;
+    if (window._meqAntiZoneMode) return true;
+    if (window._meqFractalInvertMode) return true;
+
+    // Fallback: detect CSS filter on the canvas
+    try {
+      const c = (typeof canvas !== "undefined" && canvas)
+        ? canvas
+        : document.getElementById("mequavis");
+      if (!c) return false;
+      const f = (c.style && c.style.filter) || "";
+      return /invert\s*\(/i.test(f);
+    } catch {
+      return false;
+    }
+  }
+
+  function invertColorDisplay(c) {
+    try {
+      if (!c || c === "transparent") return c;
+
+      // rgb(...) support
+      if (c.startsWith("rgb")) {
+        const nums = c
+          .replace(/[^\d,]/g, "")
+          .split(",")
+          .map((n) => parseInt(n.trim(), 10));
+        const r = nums[0] || 0;
+        const g = nums[1] || 0;
+        const b = nums[2] || 0;
+        return `rgb(${255 - r},${255 - g},${255 - b})`;
+      }
+
+      // #rrggbb support
+      if (c[0] === "#" && c.length === 7) {
+        const hex = parseInt(c.slice(1), 16);
+        const r = (hex >> 16) & 255;
+        const g = (hex >> 8) & 255;
+        const b = hex & 255;
+        const ir = 255 - r;
+        const ig = 255 - g;
+        const ib = 255 - b;
+        return `rgb(${ir},${ig},${ib})`;
+      }
+
+      return c;
+    } catch {
+      return c;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // OMNIVERSE LABEL HELPERS (DISPLAY ONLY)
   // ---------------------------------------------------------------------------
 
@@ -870,7 +927,7 @@
           traversalTarget = bestSmallWheel;
           traversalLabel = bestSmallWheel.label || null;
         }
-            } else {
+      } else {
         // B: Normal behavior (OMEGA unlocked)
         let closest = null;
         let bestDist = Infinity;
@@ -916,15 +973,11 @@
 
         traversalLabel = traversalStickyLabel;
 
-        // --- FIX: break the small-wheel streak when we're not on a small nofur ---
-        // If Eye Link 1 is *not* currently targeting a small nofur wheel, we
-        // clear lastTraverseNodeKey so that coming back to the same small
-        // (after a big in between) counts as a fresh hit.
+        // break the small-wheel streak when we're not on a small nofur
         if (!traversalTarget) {
           lastTraverseNodeKey = null;
         }
       }
-
 
       // === Draw lines ===
 
@@ -1340,8 +1393,6 @@
       traversalLabel // raw short label of link 4
     } = status;
 
-    // Eye Link 1: raw label, but:
-    //  When OMEGA is locked and active, append the current short form of link 4.
     const lockState = window.nofurLockState || {};
     const omegaLock = lockState.OMEGA || { locked: false };
 
@@ -1354,7 +1405,6 @@
       displayPrimaryLabel = `OMEGA ${traversalLabel}`;
     }
 
-    // Traversal Link: show frozen pre-click snapshot (works for enabled & disabled)
     const displayTraversalLabel = traversalDisplaySnapshot || "-";
 
     html += `<div style="font-size:10px;color:#0ff;">`;
@@ -1371,8 +1421,6 @@
     // --- COLOR SWATCHES: first 4 always populated ---
     const baseCols = new Array(6).fill(null);
 
-    // Prefer global OMEGA hybrid palette for the first 4 swatches,
-    // regardless of OMEGA lock state.
     let omegaHybrids = getOmegaHybridColors();
 
     if (Array.isArray(omegaHybrids) && omegaHybrids.length) {
@@ -1380,31 +1428,19 @@
         baseCols[i] = omegaHybrids[i % omegaHybrids.length];
       }
     } else if (Array.isArray(primaryHybridColors) && primaryHybridColors.length) {
-      // Fallback: use Eye Link 1's hybrid colors if present
       for (let i = 0; i < 4; i++) {
         baseCols[i] =
           primaryHybridColors[i] ||
           primaryHybridColors[primaryHybridColors.length - 1];
       }
     } else if (primaryColor) {
-      // Last resort: fill with the primary link color
-      for (let i = 0; i < 4; i++) {
-        baseCols[i] = primaryColor;
-      }
+      for (let i = 0; i < 4; i++) baseCols[i] = primaryColor;
     } else {
-      // Absolute fallback: give them something visible
-      for (let i = 0; i < 4; i++) {
-        baseCols[i] = "#0ff";
-      }
+      for (let i = 0; i < 4; i++) baseCols[i] = "#0ff";
     }
 
-    // Swatch 5 (secondary or composite big-bridge) & 6 (third link)
-    if (secondaryColor) {
-      baseCols[4] = secondaryColor;
-    }
+    if (secondaryColor) baseCols[4] = secondaryColor;
 
-    // If swatch 5 is still null, use a concat/blend of any locked
-    // ALPHA/BETA/GAMMA/DELTA bridge colors (NOT OMEGA).
     if (!baseCols[4]) {
       const lsAll = window.nofurLockState || {};
       const bridgeLabels = ["ALPHA", "BETA", "GAMMA", "DELTA"];
@@ -1424,17 +1460,13 @@
           null
         );
       }
-      // If no bridgeCols, we intentionally leave baseCols[4] as null.
     }
 
     if (thirdColor) baseCols[5] = thirdColor;
 
-    // >>> NEW: when seeker is DISABLED and OMEGA is locked,
-    //     swatch 6 shows the color OMEGA is locked to.
     if (!enabled && omegaLock.locked) {
       baseCols[5] = getBridgeColor("OMEGA");
     }
-    // <<< END NEW
 
     const valid = baseCols.filter(Boolean);
     let mixColor = null;
@@ -1442,8 +1474,16 @@
       mixColor = valid.reduce((acc, c) => (acc ? blendColors(acc, c) : c), null);
     }
 
+    // ✅ DISPLAY inversion for swatches when Anti/Invert is active
+    const antiMode = isAntiModeActive();
+    const dispCols = baseCols.map((c) =>
+      antiMode && c ? invertColorDisplay(c) : c
+    );
+    const dispMixColor =
+      antiMode && mixColor ? invertColorDisplay(mixColor) : mixColor;
+
     html += `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center;">`;
-    baseCols.forEach((c, idx) => {
+    dispCols.forEach((c, idx) => {
       const bg = c || "transparent";
       const border = c ? "#0ff" : "#333";
       html += `<div title="${c || ""}" style="
@@ -1456,9 +1496,9 @@
 
       if (idx === 5) {
         html += `<div style="font-size:12px;color:#0ff;padding:0 2px;">=</div>`;
-        const mixBg = mixColor || "transparent";
-        const mixBorder = mixColor ? "#0ff" : "#333";
-        html += `<div title="${mixColor || ""}" style="
+        const mixBg = dispMixColor || "transparent";
+        const mixBorder = dispMixColor ? "#0ff" : "#333";
+        html += `<div title="${dispMixColor || ""}" style="
           width:18px;
           height:18px;
           border:1px solid ${mixBorder};
@@ -1474,13 +1514,11 @@
     content.innerHTML = html;
   }
 
-
   function eyeballStep(timestamp) {
     ensureEyeballInit();
     attachMouseListener();
     if (!eyeball) return;
 
-    // Update random disabled traverse timing
     updateDisabledAutoTraverse(
       typeof timestamp === "number" ? timestamp : performance.now()
     );
@@ -1505,6 +1543,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal + omniverse-aware labels + gasket/segment prefix + pre-click traversal snapshot + OMEGA+L4 short label + disabled-mode Traversal Link display + always-on 4-swatch palette + composite non-OMEGA bridge swatch 5)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal + omniverse-aware labels + gasket/segment prefix + pre-click traversal snapshot + OMEGA+L4 short label + disabled-mode Traversal Link display + always-on 4-swatch palette + composite non-OMEGA bridge swatch 5 + swatch inversion in Anti mode)."
   );
 })();
