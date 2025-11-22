@@ -22,7 +22,7 @@
   let baseFreq = 440;      // Hz
   let rangeOctaves = 2;    // octaves
   let toneDuration = 0.2;  // seconds
-  let volume = 0.3;        // 0..1
+  let volume = 0.05;        // 0..1
   let beatBpm = 120;       // BPM for swatch #5 beat
 
   // Beat timer
@@ -267,9 +267,10 @@
         <label>Volume:
           <span id="toneVolumeValue">${(volume * 100).toFixed(0)}%</span>
         </label><br>
-        <input id="toneVolume" type="range" min="0" max="1" step="0.05" value="${volume}"
+        <input id="toneVolume" type="range" min="0.01" max="1" step="0.01" value="${volume}"
                style="width:100%;">
       </div>
+
 
       <div style="margin-bottom:6px;">
         <label>Beat Tempo:
@@ -344,13 +345,18 @@
 
     if (volSlider && volLabel) {
       volSlider.addEventListener("input", () => {
-        volume = parseFloat(volSlider.value) || 0.3;
+        let v = parseFloat(volSlider.value);
+        if (isNaN(v)) {
+          v = 0.05; // fallback to 5% if something goes weird
+        }
+        volume = v;
         volLabel.textContent = `${(volume * 100).toFixed(0)}%`;
         if (masterGain) {
           masterGain.gain.value = volume;
         }
       });
     }
+
 
     if (tempoSlider && tempoLabel) {
       tempoSlider.addEventListener("input", () => {
