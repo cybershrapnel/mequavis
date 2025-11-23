@@ -4,7 +4,7 @@
 
 ---
 
-<img src="images/meq1.png">
+<img src="images/meq1.jpg">
 
 # MEQUAVIS — What it is and How to Use It
 
