@@ -2,13 +2,14 @@
 // Hybrid wake-word + dictation system that plugs into your EXISTING audio/TTS (meq-eve-mouth.js).
 //
 // Wake/command keywords (always-on when idle, unless disabled):
-//   - "prompt"            -> clears prompt box, starts dictation
-//   - "cancel"            -> stops Eve TTS playback
-//   - "play reply"        -> replays last Eve reply (meqEveOverlay.speak())
-//   - "fast forward audio"-> skip Eve speech forward ~5s
-//   - "rewind audio"      -> skip Eve speech backward ~5s
-//   - "layer up"          -> clicks canvas Layer Up button
-//   - "layer down <n>"    -> clicks small nofur digit n (0-9)
+//   - "prompt"             -> clears prompt box, starts dictation
+//   - "ask eve"            -> clears prompt box, inserts "/eve " then starts dictation
+//   - "cancel"             -> stops Eve TTS playback (and if it's the FIRST word in dictation, cancels dictation too)
+//   - "play reply"         -> replays last Eve reply (meqEveOverlay.speak())
+//   - "fast forward audio" -> skip Eve speech forward ~5s
+//   - "rewind audio"       -> skip Eve speech backward ~5s
+//   - "layer up"           -> clicks canvas Layer Up button
+//   - "layer down <n>"     -> clicks small nofur digit n (0-9)
 //
 // Dictation mode:
 //   - Starts ONLY after wake word or mic click.
@@ -16,9 +17,10 @@
 //   - Timer refreshes on any speech; when it expires -> stop dictation.
 //   - If user says just "prompt" while dictating -> stop dictation immediately.
 //   - Wake/command listener is DISABLED while dictating (no crossfire).
-//   - Strips leading "prompt" from the first dictation chunk if SR leaks it.
+//   - Strips leading wake word ("prompt" or "ask eve") from first dictation chunk if SR leaks it.
+//   - If FIRST final dictation chunk is "cancel" -> stop dictation + cancel.
 //   - Auto-submits SEND if textarea has >= 50 chars after dictation ends.
-//   - Auto-listen toggle checkbox inserted under your left-column checkboxes.
+//   - Auto-listen toggle checkbox inserted under your CHAT SESSION left-column checkboxes.
 //
 // No new audio system is created here. We only call window.meqEveOverlay.* if present.
 
@@ -72,6 +74,7 @@
 
     // Wake/command words
     promptWord: "prompt",
+    askEvePhrase: "ask eve",
     cancelWord: "cancel",
     playReplyPhrase: "play reply",
     ffPhrase: "fast forward audio",
@@ -217,14 +220,11 @@
     return dispatchCanvasClickAtCanvasXY(canvas, target.center.x, target.center.y);
   }
 
-  // Clicks the red Layer Up button on canvas (your UI draws it right side lower control)
+  // Clicks the red Layer Up button on canvas
   function clickLayerUpButton() {
     const canvas = getCanvasEl();
     if (!canvas) return false;
 
-    // These coordinates match your canvas "LAYER UP" box approx:
-    // centerX - controlOffsetX, centerY + controlOffsetY
-    // We'll approximate by using window.meqCanvas if present.
     const mc = window.meqCanvas;
     if (!mc || !mc.center) return false;
 
@@ -234,7 +234,6 @@
     const controlOffsetX = 90;
     const controlOffsetY = 100;
 
-    // The "LAYER UP" rectangle is left-bottom control:
     const clickX = centerX - controlOffsetX;
     const clickY = centerY + controlOffsetY + 10;
 
@@ -304,7 +303,6 @@
       white-space: nowrap;
     `;
 
-    // If prompt already wrapped, reuse it
     let wrap = promptEl.parentElement;
     if (!wrap || !wrap.classList || !wrap.classList.contains("meq-prompt-wrap")) {
       wrap = document.createElement("div");
@@ -339,18 +337,13 @@
 
   const micBtn = createMicButtonAbovePrompt();
 
-  // CSS for mic-on state + interim preview
   const style = document.createElement("style");
   style.textContent = `
-    .meq-has-interim {
-      position: relative;
-    }
+    .meq-has-interim { position: relative; }
     .meq-has-interim::after {
       content: attr(data-meq-interim);
       position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 6px;
+      left: 8px; right: 8px; bottom: 6px;
       font-family: monospace;
       font-size: 10px;
       color: #888;
@@ -370,7 +363,11 @@
   // INTERIM PREVIEW / INSERT
   // -----------------------------
   let interimBuffer = "";
-  let suppressFirstWakeWord = false;
+  let suppressFirstWakePhrase = null; // "prompt" or "ask eve"
+
+  function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
 
   function renderInterimPreview() {
     const el = promptEl;
@@ -396,18 +393,17 @@
       if (!el) return;
     }
 
-    // Strip leading wake word once if SR leaks it
-    if (suppressFirstWakeWord) {
-      const lower = text.trim().toLowerCase();
-      const wake = CFG.promptWord.toLowerCase();
-      if (lower === wake) {
-        suppressFirstWakeWord = false;
+    // Strip leading wake phrase once if SR leaks it
+    if (suppressFirstWakePhrase) {
+      const wakeRe = new RegExp("^\\s*" + escapeRegExp(suppressFirstWakePhrase) + "(\\s+|$)", "i");
+      // If it's *only* the wake phrase, drop it entirely
+      if (wakeRe.test(text.trim()) && normalizeSpeech(text).length <= normalizeSpeech(suppressFirstWakePhrase).length) {
+        suppressFirstWakePhrase = null;
         return;
       }
-      if (lower.startsWith(wake + " ")) {
-        text = text.trim().slice(wake.length).trimStart();
-      }
-      suppressFirstWakeWord = false;
+      // If it starts with wake phrase, remove that prefix
+      text = text.replace(wakeRe, "");
+      suppressFirstWakePhrase = null;
     }
 
     const chunk = text + (/\s$/.test(text) ? "" : " ");
@@ -436,6 +432,15 @@
     promptEl.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
+  function prefillEvePrefix() {
+    if (!promptEl) return;
+    promptEl.value = "/eve ";
+    try {
+      promptEl.selectionStart = promptEl.selectionEnd = promptEl.value.length;
+    } catch (e) {}
+    promptEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   // -----------------------------
   // WAKE / COMMAND PARSING
   // -----------------------------
@@ -454,7 +459,6 @@
   }
 
   function parseSpokenDigitFromLayerDown(snippet) {
-    // "layer down 7" or "layer down seven"
     const n = normalizeSpeech(snippet);
     const base = normalizeSpeech(CFG.layerDownPhrase);
     const idx = n.indexOf(base);
@@ -468,17 +472,16 @@
       "five":5,"six":6,"seven":7,"eight":8,"nine":9
     };
 
-    // First token after phrase
     const tok = tail.split(" ")[0];
     if (/^\d$/.test(tok)) return parseInt(tok, 10);
     if (wordToDigit.hasOwnProperty(tok)) return wordToDigit[tok];
     return null;
   }
 
-  // Debounce so SR repeats don't multi-fire
   const CMD_DEBOUNCE_MS = 1200;
   const lastCmdTs = {
     prompt: 0,
+    askEve: 0,
     cancel: 0,
     playReply: 0,
     ff: 0,
@@ -499,9 +502,7 @@
     if (wakeListening) return;
     try {
       wakeRecog.start();
-    } catch (e) {
-      // "already started" etc.
-    }
+    } catch (e) {}
   }
 
   function stopWakeListening() {
@@ -514,6 +515,7 @@
   // -----------------------------
   let finishTimer = null;
   let hasHeardSpeech = false;
+  let dictHasFinalText = false;
 
   function clearFinishTimer() {
     if (finishTimer) {
@@ -523,7 +525,7 @@
   }
 
   function armFinishTimer() {
-    if (!hasHeardSpeech) return; // WAIT until we hear real speech
+    if (!hasHeardSpeech) return;
     clearFinishTimer();
     finishTimer = setTimeout(() => {
       if (dictListening) stopDictation("finish-timer");
@@ -541,7 +543,20 @@
     logKeyword(CFG.promptWord, snippet);
     clearPrompt();
 
-    suppressFirstWakeWord = true;
+    suppressFirstWakePhrase = CFG.promptWord;
+    startDictation();
+  }
+
+  function triggerAskEveAction(snippet) {
+    const now = Date.now();
+    if (now - lastCmdTs.askEve < CMD_DEBOUNCE_MS) return;
+    lastCmdTs.askEve = now;
+
+    logKeyword(CFG.askEvePhrase, snippet);
+    clearPrompt();
+    prefillEvePrefix();
+
+    suppressFirstWakePhrase = CFG.askEvePhrase;
     startDictation();
   }
 
@@ -600,7 +615,6 @@
 
     if (digit == null || digit < 0 || digit > 9) return;
 
-    // retry up to 3 frames in case nofurs rebuild mid-frame
     const tryClick = (tries = 0) => {
       if (clickSmallNofurDigit(digit)) return;
       if (tries < 3) requestAnimationFrame(() => tryClick(tries + 1));
@@ -620,7 +634,6 @@
   wakeRecog.onend = () => {
     wakeListening = false;
     log("wakeRecog ended");
-    // auto-restart if still enabled and idle
     if (autoListenEnabled && !dictListening) {
       setTimeout(startWakeListening, 200);
     }
@@ -635,7 +648,7 @@
   };
 
   wakeRecog.onresult = (event) => {
-    if (dictListening) return; // safety
+    if (dictListening) return;
 
     let transcript = "";
     for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -649,13 +662,14 @@
     const norm = normalizeSpeech(transcript);
 
     // COMMAND ORDER (most specific first)
-    if (snippetHasPhrase(norm, CFG.playReplyPhrase)) return triggerPlayReplyAction(transcript);
-    if (snippetHasPhrase(norm, CFG.ffPhrase))       return triggerFastForwardAction(transcript);
-    if (snippetHasPhrase(norm, CFG.rwPhrase))       return triggerRewindAction(transcript);
-    if (snippetHasPhrase(norm, CFG.layerDownPhrase))return triggerLayerDownAction(transcript);
-    if (snippetHasPhrase(norm, CFG.layerUpPhrase))  return triggerLayerUpAction(transcript);
-    if (snippetHasPhrase(norm, CFG.cancelWord))     return triggerCancelAction(transcript);
-    if (snippetHasPhrase(norm, CFG.promptWord))     return triggerPromptAction(transcript);
+    if (snippetHasPhrase(norm, CFG.playReplyPhrase))  return triggerPlayReplyAction(transcript);
+    if (snippetHasPhrase(norm, CFG.ffPhrase))        return triggerFastForwardAction(transcript);
+    if (snippetHasPhrase(norm, CFG.rwPhrase))        return triggerRewindAction(transcript);
+    if (snippetHasPhrase(norm, CFG.layerDownPhrase)) return triggerLayerDownAction(transcript);
+    if (snippetHasPhrase(norm, CFG.layerUpPhrase))   return triggerLayerUpAction(transcript);
+    if (snippetHasPhrase(norm, CFG.cancelWord))      return triggerCancelAction(transcript);
+    if (snippetHasPhrase(norm, CFG.askEvePhrase))    return triggerAskEveAction(transcript);
+    if (snippetHasPhrase(norm, CFG.promptWord))      return triggerPromptAction(transcript);
   };
 
   // -----------------------------
@@ -664,6 +678,7 @@
   dictRecog.onstart = () => {
     dictListening = true;
     hasHeardSpeech = false;
+    dictHasFinalText = false;
     clearFinishTimer();
     interimBuffer = "";
     renderInterimPreview();
@@ -679,10 +694,7 @@
     if (micBtn) micBtn.classList.remove("listening");
     log("dictRecog ended");
 
-    // Auto-send if enough chars
     autoSubmitIfLongEnough();
-
-    // Resume wake SR if enabled
     setTimeout(startWakeListening, 250);
   };
 
@@ -711,24 +723,36 @@
     const anyTxt = (finalText || interim).trim();
     if (anyTxt.length > 0) {
       if (!hasHeardSpeech) {
-        hasHeardSpeech = true; // NOW we start hybrid timer
+        hasHeardSpeech = true;
       }
       armFinishTimer();
     }
 
-    // If user says JUST "prompt" while dictating -> stop dictation.
-    // (Only if it's standalone, not inside a sentence.)
     if (finalText) {
       const just = normalizeSpeech(finalText);
+
+      // If FIRST final dictation chunk is "cancel" -> stop dictation + cancel
+      if (!dictHasFinalText) {
+        const cancelNorm = normalizeSpeech(CFG.cancelWord);
+        if (just === cancelNorm || just.startsWith(cancelNorm + " ")) {
+          logKeyword(CFG.cancelWord + " (dict-first-word)", finalText);
+          stopEveAudio();
+          stopDictation("cancel-first-word");
+          dictHasFinalText = true;
+          return;
+        }
+      }
+
+      // If user says JUST "prompt" while dictating -> stop dictation.
       if (just === normalizeSpeech(CFG.promptWord)) {
         logKeyword(CFG.promptWord + " (dict-stop)", finalText);
         stopDictation("prompt-during-dict");
+        dictHasFinalText = true;
         return;
       }
-    }
 
-    if (finalText) {
       insertText(finalText);
+      dictHasFinalText = true;
       interimBuffer = "";
     } else {
       interimBuffer = interim;
@@ -742,7 +766,7 @@
   // -----------------------------
   function startDictation() {
     if (dictListening) return;
-    stopWakeListening(); // avoid SR crossfire
+    stopWakeListening();
 
     try {
       dictRecog.start();
@@ -760,7 +784,7 @@
   function toggleDictation() {
     if (dictListening) stopDictation("mic-toggle");
     else {
-      suppressFirstWakeWord = false;
+      suppressFirstWakePhrase = null;
       startDictation();
     }
   }
@@ -789,47 +813,47 @@
   }
 
   // -----------------------------
-  // LEFT COLUMN AUTO-LISTEN CHECKBOX INJECTION
+  // CHAT SESSION LEFT COLUMN AUTO-LISTEN CHECKBOX INJECTION
   // -----------------------------
   function injectAutoListenCheckbox() {
-    const panel = document.getElementById("segmentLog");
+    const panel = document.getElementById("chatSessionPanel");
     if (!panel) return false;
 
-    // insert after your mute row if present
-    const muteRow = panel.querySelector("#segmentMuteRow");
-    const existing = panel.querySelector("#meqAutoListenRow");
-    if (existing) return true;
+    const filtersEl = panel.querySelector("#sessionFilters");
+    if (!filtersEl) return false;
 
-    const row = document.createElement("div");
+    if (filtersEl.querySelector("#meqAutoListenRow")) return true;
+
+    const row = document.createElement("label");
     row.id = "meqAutoListenRow";
-    row.style.cssText = `
-      margin-bottom: 6px;
-      font-size: 10px;
-      color: var(--meq-accent, #0ff);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    `;
+    row.style.display = "block";
+    row.style.marginTop = "6px";
+    row.style.cursor = "pointer";
+    row.style.fontSize = "10px";
+    row.style.color = "var(--meq-accent, #0ff)";
+    row.style.userSelect = "none";
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.id = "meqAutoListenCb";
     cb.checked = autoListenEnabled;
+    cb.style.marginRight = "4px";
     cb.style.cursor = "pointer";
 
     cb.addEventListener("change", () => {
       setAutoListenEnabled(cb.checked);
     });
 
-    const label = document.createElement("label");
-    label.htmlFor = "meqAutoListenCb";
-    label.textContent = "Auto listen for 'prompt'";
-
     row.appendChild(cb);
-    row.appendChild(label);
+    row.appendChild(document.createTextNode(" Auto listen for 'prompt' / 'ask eve'"));
 
-    if (muteRow) muteRow.insertAdjacentElement("afterend", row);
-    else panel.insertBefore(row, panel.firstChild);
+    // Put it at bottom of checkbox list, before search if present
+    const searchWrap = filtersEl.querySelector("#sessionSearchWrap");
+    if (searchWrap) {
+      filtersEl.insertBefore(row, searchWrap);
+    } else {
+      filtersEl.appendChild(row);
+    }
 
     return true;
   }
