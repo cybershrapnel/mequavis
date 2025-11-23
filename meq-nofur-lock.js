@@ -265,7 +265,9 @@
     ctx.restore();
 
     // Label below/above ring
-    ctx.fillStyle = "white";
+    //ctx.fillStyle = "white";
+    const antiOn = window._meqFractalAnti === true;
+    ctx.fillStyle = antiOn ? "#000000" : "#ffffff"; // black pre-invert -> white in anti mode
     ctx.font = "16px monospace";
     ctx.textAlign = "center";
     if (!isLeft && !isRight && (label === "ALPHA" || label === "BETA")) {
