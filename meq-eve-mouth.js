@@ -24,6 +24,86 @@ const SKIP_SECONDS = 5;            // y/r skip chunk size
 // Max chars per speech chunk (to avoid browser limits)
 const MAX_CHARS_PER_CHUNK = 4000;
 
+// -------------------------
+// AUTO-SPEAK UI + STATE
+// -------------------------
+const AUTO_SPEAK_STORAGE_KEY = "meq_eve_auto_speak_enabled";
+let autoSpeakEnabled = false;
+
+function loadAutoSpeakPref() {
+  try {
+    autoSpeakEnabled = (localStorage.getItem(AUTO_SPEAK_STORAGE_KEY) === "true");
+  } catch (e) {
+    autoSpeakEnabled = false;
+  }
+  return autoSpeakEnabled;
+}
+
+function setAutoSpeakEnabled(v) {
+  autoSpeakEnabled = !!v;
+  try {
+    localStorage.setItem(AUTO_SPEAK_STORAGE_KEY, autoSpeakEnabled ? "true" : "false");
+  } catch (e) {}
+  // expose for debugging if you want
+  window.meqEveOverlay = window.meqEveOverlay || {};
+  window.meqEveOverlay.autoSpeakEnabled = autoSpeakEnabled;
+}
+
+// inject checkbox under the filters in the chat session panel
+function injectAutoSpeakCheckbox() {
+  const panel = document.getElementById("chatSessionPanel");
+  if (!panel) return false;
+
+  const filtersEl = panel.querySelector("#sessionFilters");
+  if (!filtersEl) return false;
+
+  // already injected?
+  if (filtersEl.querySelector("#eveAutoSpeakCb")) return true;
+
+  const label = document.createElement("label");
+  label.style.display = "block";
+  label.style.marginTop = "6px";
+  label.style.cursor = "pointer";
+
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.id = "eveAutoSpeakCb";
+  cb.checked = autoSpeakEnabled;
+  cb.style.marginRight = "4px";
+
+  cb.addEventListener("change", () => {
+    setAutoSpeakEnabled(cb.checked);
+  });
+
+  label.appendChild(cb);
+  label.appendChild(document.createTextNode(" Auto speak responses"));
+
+  // Put it at the bottom of the checkbox list, before the search box
+  const searchWrap = filtersEl.querySelector("#sessionSearchWrap");
+  if (searchWrap) {
+    filtersEl.insertBefore(label, searchWrap);
+  } else {
+    filtersEl.appendChild(label);
+  }
+
+  return true;
+}
+
+function startAutoSpeakInjectionPoll() {
+  // try now
+  if (injectAutoSpeakCheckbox()) return;
+
+  // poll a bit until chat panel exists
+  let tries = 0;
+  const interval = setInterval(() => {
+    tries++;
+    if (injectAutoSpeakCheckbox() || tries > 80) {
+      clearInterval(interval);
+    }
+  }, 250); // ~20s max
+}
+
+
 let eveRoot = null;
 let mixer = null;
 
@@ -50,9 +130,6 @@ function isEditableTarget(target) {
   return false;
 }
 
-// Normalize text before speaking:
-// - remove any occurrences of "**" (two asterisks in a row).
-//   Single "*" is fine. "***" -> "*" (because "**" is stripped, leaving one "*").
 // Normalize text before speaking:
 // - strip markdown emphasis wrappers: **bold** and *italic*
 // - THEN remove any remaining leading "*" at start of a line (bullet-style)
@@ -313,8 +390,6 @@ function setupUtteranceEvents(utter, chunkEndGlobal) {
     currentUtterance = null;
     resetMouth();
   };
-
-  // NOTE: we intentionally do NOT use onboundary anymore.
 }
 
 // Speak from a given absolute char index in the full text
@@ -351,7 +426,6 @@ function speakFromCharIndex(charIndex) {
     }
   }
   if (chunkIndex === -1) {
-    // Shouldn't happen, but fail-safe
     stopEveSpeech();
     return;
   }
@@ -371,8 +445,6 @@ function speakFromCharIndex(charIndex) {
   currentCharIndex = startIdx;
   currentUtterance = utter;
 
-  // This utterance will logically end at the end of this chunk,
-  // even though we might have started mid-chunk.
   const chunkEndGlobal = chunk.end;
   setupUtteranceEvents(utter, chunkEndGlobal);
 
@@ -396,7 +468,6 @@ function speakEveLine() {
 }
 
 // Skip forward/backward by secondsDelta (approx chars-based),
-// using the logical currentCharIndex so multiple skips accumulate.
 function skipEveSpeech(secondsDelta) {
   if (!("speechSynthesis" in window)) return;
   if (!isSpeaking) return;
@@ -411,7 +482,6 @@ function skipEveSpeech(secondsDelta) {
 
   if (targetCharIndex < 0) targetCharIndex = 0;
   if (targetCharIndex >= len) {
-    // jumped beyond the end → just stop
     stopEveSpeech();
     return;
   }
@@ -429,19 +499,15 @@ function handleKeyDown(e) {
 
   if (key === "t" || key === "T") {
     e.preventDefault();
-
-    // Toggle behavior: if speaking, stop; otherwise start
     if (isSpeaking) {
       stopEveSpeech();
     } else {
       speakEveLine();
     }
   } else if (key === "y" || key === "Y") {
-    // Skip forward ~5 seconds
     e.preventDefault();
     skipEveSpeech(SKIP_SECONDS);
   } else if (key === "r" || key === "R") {
-    // Skip backward ~5 seconds
     e.preventDefault();
     skipEveSpeech(-SKIP_SECONDS);
   }
@@ -455,7 +521,6 @@ function patchMixerForMouth(m) {
   const originalUpdate = m.update.bind(m);
   m.update = function patchedUpdate(delta) {
     originalUpdate(delta);
-    // Run mouth anim AFTER animation blending
     animateMouth(performance.now());
   };
 
@@ -468,7 +533,6 @@ function patchMixerForMouth(m) {
 // ------------- Fallback RAF loop -------------
 
 function rafLoop(now) {
-  // If we don't have a mixer, run mouth anim from here.
   if (!mixer) {
     animateMouth(now);
   }
@@ -493,15 +557,28 @@ function tryHookIntoEve() {
 }
 
 function init() {
+  // Load auto-speak pref before we expose API/UI
+  loadAutoSpeakPref();
+  setAutoSpeakEnabled(autoSpeakEnabled);
+  startAutoSpeakInjectionPoll();
+
   // Expose a small helper API for other scripts
   window.meqEveOverlay = window.meqEveOverlay || {};
+
   window.meqEveOverlay.setSpeechText = function (text) {
     const normalized = normalizeSpeechText(String(text));
     window.EVE_SPEECH_TEXT = normalized;
     currentSpeechText = normalized;
     currentCharIndex = 0;
     buildSpeechChunks(currentSpeechText);
+
+    // ✅ AUTO SPEAK: if enabled, play immediately (no key/button)
+    if (autoSpeakEnabled) {
+      stopEveSpeech();   // kill any current line cleanly
+      speakEveLine();    // speak new text
+    }
   };
+
   window.meqEveOverlay.stopSpeech = stopEveSpeech;
   window.meqEveOverlay.speak = function () {
     speakEveLine();
@@ -518,12 +595,11 @@ function init() {
     }
   });
 
-  // Try immediately, then poll until the main overlay has loaded.
   if (!tryHookIntoEve()) {
     let tries = 0;
     const interval = setInterval(() => {
       tries++;
-      if (tryHookIntoEve() || tries > 60) { // ~15s at 250ms
+      if (tryHookIntoEve() || tries > 60) {
         clearInterval(interval);
       }
     }, 250);
@@ -532,7 +608,6 @@ function init() {
   window.addEventListener("keydown", handleKeyDown);
   requestAnimationFrame(rafLoop);
 
-  // Ensure voices are loaded in some browsers
   if ("speechSynthesis" in window) {
     window.speechSynthesis.onvoiceschanged = () => {};
   }
