@@ -55,21 +55,26 @@ function isEditableTarget(target) {
 //   Single "*" is fine. "***" -> "*" (because "**" is stripped, leaving one "*").
 // Normalize text before speaking:
 // - strip markdown emphasis wrappers: **bold** and *italic*
-// - but do NOT touch asterisks used as math operators (3*5) or bullets ("* item")
+// - THEN remove any remaining leading "*" at start of a line (bullet-style)
+// - but do NOT touch asterisks used as math operators (3*5) or inline a*b
 function normalizeSpeechText(text) {
   if (typeof text !== "string") return "";
   let out = text;
 
-  // **bold**  (requires boundary before and after so we don't hit 3*5 or a*b)
-  const boldRe = /(^|[\s([{<"'`])\*\*(?=\S)([\s\S]*?\S)\*\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
+  // **bold**
+  const boldRe =
+    /(^|[\s([{<"'`])\*\*(?=\S)([\s\S]*?\S)\*\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
   out = out.replace(boldRe, "$1$2");
 
   // *italic*
-  // - same boundary rules
-  // - don't span newlines
-  // - don't match if the inside contains another * (keeps it simple/safe)
-  const italicRe = /(^|[\s([{<"'`])\*(?=\S)([^*\n]*?\S)\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
+  const italicRe =
+    /(^|[\s([{<"'`])\*(?=\S)([^*\n]*?\S)\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
   out = out.replace(italicRe, "$1$2");
+
+  // LAST PASS: remove asterisk bullets at the start of a line:
+  // "* item" or "   * item"  -> "item"
+  // only if the * is followed by whitespace
+  out = out.replace(/^[ \t]*\*[ \t]+/gm, "");
 
   return out;
 }
