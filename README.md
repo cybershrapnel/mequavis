@@ -19,7 +19,7 @@ Think of MEQUAVIS as:
 
 ---
 
-# MEQUAVIS — Newcomer Preamble / Quickstart (drop-in, current-state accurate)
+# MEQUAVIS — Newcomer Preamble / Quickstart
 
 This preamble is for someone opening MEQUAVIS for the first time. It tells them what’s real **in the app right now**, what to do first, and how the canon relates to what they’re seeing.
 
