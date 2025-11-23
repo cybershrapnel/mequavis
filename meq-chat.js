@@ -263,13 +263,24 @@ window.MeqChat = (function () {
         color: var(--meq-accent) !important;
       }
 
-      /* AI action icons */
+      /* AI action icons follow accent */
       #aiOutput .msg-copy-btn,
-      #aiOutput .msg-play-btn,
-      #chatSessionPanel .fav-btn,
-      #chatSessionPanel .fav-foreign {
+      #aiOutput .msg-play-btn {
         color: var(--meq-accent) !important;
       }
+
+      /* --- FAVORITES MUST STAY FIXED COLORS --- */
+      /* Your favorites = green */
+      #chatSessionPanel .fav-btn.solid,
+      #chatSessionPanel .fav-btn.hollow {
+        color: #0f0 !important;
+      }
+
+      /* Other users' favorites = red */
+      #chatSessionPanel .fav-foreign {
+        color: #f00 !important;
+      }
+
 
       /* Scrollbars */
       body,
@@ -376,6 +387,37 @@ window.MeqChat = (function () {
 
     parent.insertBefore(wrap, modelSelect);
     wrap.appendChild(modelSelect);
+modelSelect.style.width = "180px";
+    // --- NEW: toggle button right after model dropdown
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "meq-mini-btn meq-toggle-btn";
+    toggleBtn.textContent = "▶";
+    toggleBtn.title = "Show controls";
+    toggleBtn.style.padding = "2px 4px"; // slightly tighter than normal mini buttons
+    wrap.appendChild(toggleBtn);
+
+    // --- NEW: container that holds ALL injected controls we want to hide/show
+    const controlsDiv = document.createElement("div");
+    controlsDiv.id = "meqTopInjectedControls";
+    controlsDiv.style.cssText = `
+      display:none;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:6px;
+      width:100%;
+      flex: 1 1 100%;
+      margin-top:4px;
+    `;
+    wrap.appendChild(controlsDiv);
+
+    let controlsOpen = false;
+    toggleBtn.addEventListener("click", () => {
+      controlsOpen = !controlsOpen;
+      controlsDiv.style.display = controlsOpen ? "flex" : "none";
+      toggleBtn.textContent = controlsOpen ? "▼" : "▶";
+      toggleBtn.title = controlsOpen ? "Hide controls" : "Show controls";
+    });
 
     const style = document.createElement("style");
     style.textContent = `
@@ -539,7 +581,7 @@ window.MeqChat = (function () {
     groupFont.appendChild(sizeLabel);
     groupFont.appendChild(fontLabel);
     groupFont.appendChild(fontSelect);
-    wrap.appendChild(groupFont);
+    controlsDiv.appendChild(groupFont);
 
     // GROUP 2
     const groupText = document.createElement("div");
@@ -589,7 +631,7 @@ window.MeqChat = (function () {
     groupText.appendChild(colorPicker);
     groupText.appendChild(hueLabel);
     groupText.appendChild(hueSlider);
-    wrap.appendChild(groupText);
+    controlsDiv.appendChild(groupText);
 
     // GROUP 3
     const groupUi = document.createElement("div");
@@ -639,7 +681,7 @@ window.MeqChat = (function () {
     groupUi.appendChild(uiColorPicker);
     groupUi.appendChild(uiHueLabel);
     groupUi.appendChild(uiHueSlider);
-    wrap.appendChild(groupUi);
+    controlsDiv.appendChild(groupUi);
 
     // GROUP 4
     const resetGroup = document.createElement("div");
@@ -675,12 +717,13 @@ window.MeqChat = (function () {
     });
 
     resetGroup.appendChild(resetBtn);
-    wrap.appendChild(resetGroup);
+    controlsDiv.appendChild(resetGroup);
 
     updateSizeLabel();
     applyTextPrefs();
     applyUiPrefs();
   }
+
 
   // --- Color math helpers (hex <-> HSL) ---
   function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
