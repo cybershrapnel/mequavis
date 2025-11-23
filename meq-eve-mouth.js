@@ -53,10 +53,27 @@ function isEditableTarget(target) {
 // Normalize text before speaking:
 // - remove any occurrences of "**" (two asterisks in a row).
 //   Single "*" is fine. "***" -> "*" (because "**" is stripped, leaving one "*").
+// Normalize text before speaking:
+// - strip markdown emphasis wrappers: **bold** and *italic*
+// - but do NOT touch asterisks used as math operators (3*5) or bullets ("* item")
 function normalizeSpeechText(text) {
   if (typeof text !== "string") return "";
-  return text.replace(/\*\*/g, "");
+  let out = text;
+
+  // **bold**  (requires boundary before and after so we don't hit 3*5 or a*b)
+  const boldRe = /(^|[\s([{<"'`])\*\*(?=\S)([\s\S]*?\S)\*\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
+  out = out.replace(boldRe, "$1$2");
+
+  // *italic*
+  // - same boundary rules
+  // - don't span newlines
+  // - don't match if the inside contains another * (keeps it simple/safe)
+  const italicRe = /(^|[\s([{<"'`])\*(?=\S)([^*\n]*?\S)\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
+  out = out.replace(italicRe, "$1$2");
+
+  return out;
 }
+
 
 // Build speechChunks from the full text, each up to MAX_CHARS_PER_CHUNK
 function buildSpeechChunks(fullText) {
