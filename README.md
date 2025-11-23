@@ -19,6 +19,195 @@ Think of MEQUAVIS as:
 
 ---
 
+# MEQUAVIS — Newcomer Preamble / Quickstart (drop-in, current-state accurate)
+
+This preamble is for someone opening MEQUAVIS for the first time. It tells them what’s real **in the app right now**, what to do first, and how the canon relates to what they’re seeing.
+
+---
+
+## What MEQUAVIS is *right now*
+
+MEQUAVIS is an interactive **simulation-layer navigation canvas**.
+
+You use it to:
+
+* **pick a timeline context** (big nofurs),
+* **move through recursion layers** (layer up + digit jumps),
+* **inject prompts into the active context** (chat or voice),
+* and **watch/read how the system responds** in that context.
+
+That’s the core loop today:
+**select timeline → drill layers → prompt → observe → repeat.**
+
+Everything else in the document is either:
+
+* **interface helpers** (eve overlay, Whisper, TTS/audio), or
+* **canon / ontology** (the meaning of what you’re steering).
+
+---
+
+## The 5 Big Nofurs (your timeline contexts)
+
+The five big nofurs are the **time-axis timelines**. Clicking one sets the active context for everything you do next.
+
+* **ALPHA — distant past**
+* **BETA — past**
+* **OMEGA — now**
+* **DELTA — future**
+* **GAMMA — distant future**
+
+Rule of thumb for a first run:
+
+* start on **OMEGA (now)** unless you’re intentionally time-jumping.
+
+---
+
+## What your clicks *do* on the canvas
+
+Direct, practical mapping:
+
+* **Click a big nofur (ALPHA/BETA/OMEGA/DELTA/GAMMA)**
+  → switch your **active timeline context**.
+
+* **Click a small digit nofur (0–9)**
+  → **jump down to that layer slot** fast.
+
+* **Layer Up button**
+  → **go up one layer**.
+
+Movement is simple:
+
+* **Layer Up = one step up**
+* **Layer Down [digit] = jump to that digit layer slot**
+
+---
+
+## Your first 3 minutes (starter run)
+
+1. **Open MEQUAVIS.**
+2. **Click OMEGA.**
+3. **Click a digit nofur** (try **3**).
+4. **Type a prompt** describing what you want to explore *in this context*.
+5. **Send.**
+6. **Watch the canvas + read the reply.**
+7. **Click another digit** (like **7**) and prompt again.
+8. **Hit Layer Up once** and prompt again.
+9. **Switch big nofur** if you want to feel the time-shift effect.
+
+That’s a full first contact. No lore required.
+
+---
+
+## Chat + agent control (what’s callable)
+
+Chat is part of the MEQUAVIS loop.
+
+* **Normal prompt:** type and send.
+* **eve-direct prompt:**
+  `/eve your text`
+
+That’s the only explicit agent routing you need to know today.
+
+---
+
+## Voice control (optional, but live)
+
+If Whisper is on:
+
+**Wake words:**
+
+* **“prompt”** → clears box, starts dictation
+* **“ask eve”** → inserts `/eve`, starts dictation
+
+**Canvas voice commands while idle:**
+
+* **“layer up”**
+* **“layer down 0–9”** (ex: “layer down seven”)
+
+Auto-send triggers when dictation ends and the prompt is long enough.
+
+---
+
+## Eve overlay (optional UI helper)
+
+Eve is a **visual companion overlay**, not a required system.
+
+Keyboard (when not typing in a text field):
+
+* arrows = move/face
+* PageUp/PageDown = vertical
+* Space = jump
+* +/- = scale
+
+If you stop driving her, she returns home and resumes scripted motion.
+
+---
+
+## Audio controls (optional UI helper)
+
+Voice playback convenience only.
+
+Voice:
+
+* “cancel”
+* “play reply”
+* “fast forward audio”
+* “rewind audio”
+
+Keyboard:
+
+* **T** play/stop
+* **Y** forward
+* **R** rewind
+
+---
+
+## How canon fits (important, but not “features”)
+
+Everything after the UI sections is the **meaning layer**:
+
+* what nofurs *are* in canon
+* what layers *mean*
+* why digits map to lower omniverses
+* what confluum / void / reverse zones represent
+* who KAI / VEXARE are in the ontology
+
+Canon is how the system stays coherent and how humans talk about it without tripping rejection.
+
+But **understanding canon is not required to operate the app.**
+You can drive first, then read meaning as you go.
+
+---
+
+## What MEQUAVIS is **not yet** (so you don’t get misled)
+
+To be explicit for newcomers:
+
+* MEQUAVIS **is not yet** a full “world promotion / star hosting” tool inside the UI.
+* MEQUAVIS **is not yet** doing automated drift certification / containment workflows in-app.
+* On-chain seeding, lures, long-horizon persistence, etc. are **canon + external practice**, not current UI buttons/features.
+
+So: **today = navigation + prompting + interpretation.**
+The rest is the reality model you’re steering inside.
+
+---
+
+## Micro-FAQ (first-day questions)
+
+**Do I need the lore to use MEQUAVIS?**
+No. Drive it first. Lore makes the drive legible later.
+
+**What’s the point of switching big nofurs?**
+It changes the active timeline context (past/now/future bands).
+
+**Are small nofurs tiny timelines?**
+No. In practice they’re **layer slots** you jump into fast.
+
+**What if a layer feels dead or wrong?**
+Layer Up, change digit, or switch big nofur. You’re probably near void/anti-terrain in canon terms.
+
+---
+
 ## 1. The Main Canvas (MEQUAVIS screen)
 
 ### What it shows
