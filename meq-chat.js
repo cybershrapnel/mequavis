@@ -10,6 +10,60 @@ window.MeqChat = (function () {
   let currentSessionCreatedAt = null;
   let sessions                = []; // [{ id, created_at, owner, title, favorite }]
 
+  // Which folder are we viewing in the left panel?
+  // "active"  -> chat_logs
+  // "deleted" -> deleted (owner-only list)
+  // "archive" -> archive (public list like normal)
+  let sessionViewMode = "active";
+
+  // ✅ Adjustable restore window for archive -> active (in days)
+  // Change this later whenever you want.
+  const ARCHIVE_RESTORE_MAX_DAYS = 1;
+
+  function getListActionForMode(mode) {
+    if (mode === "deleted") return "list_deleted_sessions";
+    if (mode === "archive") return "list_archive_sessions";
+    return "list_sessions";
+  }
+
+  function getLoadActionForMode(mode) {
+    if (mode === "deleted") return "load_deleted_session";
+    if (mode === "archive") return "load_archive_session";
+    return "load_session";
+  }
+
+  async function setSessionViewMode(mode) {
+    sessionViewMode = mode;
+    await loadSessionList(mode);
+  }
+  function isArchiveRestoreAllowed(sessionObj) {
+    if (!sessionObj || !sessionObj.created_at) return false;
+
+    const rawCreated = sessionObj.created_at;
+    const t = Date.parse(rawCreated);
+    if (Number.isNaN(t)) {
+      console.warn("[ArchiveRestoreCheck] Bad created_at date:", rawCreated);
+      return false;
+    }
+
+    const ageMs = Date.now() - t;
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+    console.log(
+      "[ArchiveRestoreCheck]",
+      {
+        created_at: rawCreated,
+        parsed_ms: t,
+        now_ms: Date.now(),
+        age_days: ageDays,
+        limit_days: ARCHIVE_RESTORE_MAX_DAYS,
+        allowed: ageDays <= ARCHIVE_RESTORE_MAX_DAYS
+      }
+    );
+
+    return ageDays <= ARCHIVE_RESTORE_MAX_DAYS;
+  }
+
   let contextMenuEl           = null;
   let contextMenuSessionId    = null;
 
@@ -19,18 +73,17 @@ window.MeqChat = (function () {
     hideNonFav:    false,
     hideOthers:    false,
     hideSelf:      false,
-    hideUserChat:  false,  // NEW
+    hideUserChat:  false,
     searchTerm:    ""
   };
 
   const state = {
-    messages: [] // { role: "user" | "assistant", content: string }
+    messages: []
   };
 
   // ---------------------------------------------------------------------------
   // EVE SPEECH CONTROL FROM CHAT
   // ---------------------------------------------------------------------------
-  // Track which text we last sent to Eve's TTS
   let lastEveSpeechText = null;
 
   function playEveForText(text) {
@@ -44,11 +97,10 @@ window.MeqChat = (function () {
     }
 
     const overlay = window.meqEveOverlay;
-    const isSpeaking = !!overlay.isSpeaking; // boolean getter
+    const isSpeaking = !!overlay.isSpeaking;
 
     const sameAsLast = (lastEveSpeechText === trimmed);
 
-    // If same text and currently speaking → toggle OFF
     if (sameAsLast && isSpeaking) {
       if (typeof overlay.stopSpeech === "function") {
         overlay.stopSpeech();
@@ -56,13 +108,11 @@ window.MeqChat = (function () {
       return;
     }
 
-    // New text (or same text but not speaking) → speak this line
     overlay.setSpeechText(trimmed);
 
     if (typeof overlay.speak === "function") {
       overlay.speak();
     } else {
-      // Fallback: simulate pressing "t" (uses the keyboard handler)
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
     }
 
@@ -75,7 +125,6 @@ window.MeqChat = (function () {
         await navigator.clipboard.writeText(text);
         return;
       }
-      // Fallback for older browsers
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.style.position = "fixed";
@@ -126,7 +175,6 @@ window.MeqChat = (function () {
       label = provider.toUpperCase();
     }
 
-    // Inject AI reply into Eve's speech text by default
     try {
       if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
         window.meqEveOverlay.setSpeechText(reply);
@@ -180,29 +228,21 @@ window.MeqChat = (function () {
 
   // ---------------------------------------------------------------------------
   // SMALL MARKDOWN-ISH FORMATTER
-  // - escapes HTML
-  // - preserves newlines
-  // - renders `inline code` as <code>…</code>
   // ---------------------------------------------------------------------------
   function formatStreamText(text) {
     if (!text) return "";
 
-    // Escape HTML
     let escaped = text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    // Backticked inline code → <code>...</code>
     escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-    // Newlines → <br>
     escaped = escaped.replace(/\r\n|\r|\n/g, "<br>");
 
     return escaped;
   }
 
-  // Helper: classify sender as AI vs user
   function isAISender(sender) {
     if (!sender) return false;
     const s = String(sender).toLowerCase();
@@ -214,7 +254,6 @@ window.MeqChat = (function () {
     return false;
   }
 
-  // Apply "Hide User Chat" filter to messages
   function applyUserChatFilter() {
     if (!aiOutputEl) return;
     const hide = !!filters.hideUserChat;
@@ -225,7 +264,7 @@ window.MeqChat = (function () {
   }
 
   // ---------------------------------------------------------------------------
-  // APPEND A FULLY-FORMATTED MESSAGE (USED FOR HISTORY + NON-STREAMED)
+  // APPEND A FULLY-FORMATTED MESSAGE
   // ---------------------------------------------------------------------------
   function appendFormattedMessage(sender, text) {
     if (!aiOutputEl) return;
@@ -233,11 +272,6 @@ window.MeqChat = (function () {
     const msgDiv = document.createElement("div");
     msgDiv.className = "msg";
 
-    // Classify message:
-    // - AI / model → msg-ai
-    // - "You" (main prompt) → msg-self (never hidden)
-    // - "System" → msg-system (never hidden)
-    // - Anything else (room usernames) → msg-user (Hide User Chat affects these)
     if (isAISender(sender)) {
       msgDiv.classList.add("msg-ai");
     } else if (sender === "You" || sender === "User Query") {
@@ -256,12 +290,10 @@ window.MeqChat = (function () {
     contentSpan.className = "streamed-text";
     contentSpan.innerHTML = formatStreamText(text);
 
-    // Optional controls for AI messages
     let playBtn = null;
     let copyBtn = null;
 
     if (isAISender(sender)) {
-      // 🔊 Play button
       playBtn = document.createElement("button");
       playBtn.className = "msg-play-btn";
       playBtn.title = "Make Eve say this";
@@ -270,7 +302,6 @@ window.MeqChat = (function () {
         playEveForText(text);
       });
 
-      // 📋 Clipboard button
       copyBtn = document.createElement("button");
       copyBtn.className = "msg-copy-btn";
       copyBtn.title = "Copy response to clipboard";
@@ -280,7 +311,6 @@ window.MeqChat = (function () {
       });
     }
 
-    // Build layout: [play] [sender] [content] [clipboard]
     if (playBtn) msgDiv.appendChild(playBtn);
     msgDiv.appendChild(senderSpan);
     msgDiv.appendChild(contentSpan);
@@ -291,12 +321,11 @@ window.MeqChat = (function () {
     const scrollEl = rightMiddleEl || aiOutputEl.parentElement || aiOutputEl;
     scrollEl.scrollTop = scrollEl.scrollHeight;
 
-    // This only hides .msg-user, not .msg-self or .msg-system
     applyUserChatFilter();
   }
 
   // ---------------------------------------------------------------------------
-  // STREAMING / CHUNKED OUTPUT (WORD/TOKEN-BASED) + AUTO-SCROLL
+  // STREAMING OUTPUT
   // ---------------------------------------------------------------------------
   function streamAIReply(senderLabel, fullText) {
     if (!aiOutputEl) {
@@ -307,7 +336,7 @@ window.MeqChat = (function () {
     }
 
     const msgDiv = document.createElement("div");
-    msgDiv.className = "msg msg-ai"; // AI streaming output is always AI-side
+    msgDiv.className = "msg msg-ai";
 
     const senderSpan = document.createElement("span");
     senderSpan.className = "sender";
@@ -316,7 +345,6 @@ window.MeqChat = (function () {
     const contentSpan = document.createElement("span");
     contentSpan.className = "streamed-text";
 
-    // 🔊 Play button (uses fullText)
     const playBtn = document.createElement("button");
     playBtn.className = "msg-play-btn";
     playBtn.title = "Make Eve say this";
@@ -325,7 +353,6 @@ window.MeqChat = (function () {
       playEveForText(fullText);
     });
 
-    // 📋 Clipboard button
     const copyBtn = document.createElement("button");
     copyBtn.className = "msg-copy-btn";
     copyBtn.title = "Copy response to clipboard";
@@ -334,7 +361,6 @@ window.MeqChat = (function () {
       copyToClipboard(fullText);
     });
 
-    // Layout: [play] [sender] [content] [clipboard]
     msgDiv.appendChild(playBtn);
     msgDiv.appendChild(senderSpan);
     msgDiv.appendChild(contentSpan);
@@ -362,13 +388,11 @@ window.MeqChat = (function () {
     }
 
     step();
-
-    // AI messages are not affected by Hide User Chat, but calling this is safe.
     applyUserChatFilter();
   }
 
   // ---------------------------------------------------------------------------
-  // CHAT SESSION PANEL (LEFT SIDE IN FULL CHAT MODE)
+  // CHAT SESSION PANEL
   // ---------------------------------------------------------------------------
   function createSessionPanel() {
     if (document.getElementById("chatSessionPanel")) return;
@@ -380,7 +404,7 @@ window.MeqChat = (function () {
       <div id="sessionFilters">
         <label><input type="checkbox" id="filterHideFav"> Hide favorited</label>
         <label><input type="checkbox" id="filterHideNonFav"> Hide non-favorited</label>
-        <label><input type="checkbox" id="filterHideOthers"> Hide sessions from others</label>
+        <label><input type="checkbox" id="filterHideOthers" checked> Hide sessions from others</label>
         <label><input type="checkbox" id="filterHideSelf"> Hide my sessions</label>
         <label><input type="checkbox" id="filterHideUserChat"> Hide User Chat</label>
         <div id="sessionSearchWrap">
@@ -391,68 +415,43 @@ window.MeqChat = (function () {
                         font-family:monospace; font-size:10px; border-radius:3px; padding:2px 4px;">
         </div>
       </div>
+
       <button id="newSessionBtn">NEW SESSION</button>
+      <button id="viewDeletedBtn">VIEW MY DELETED SESSIONS</button>
+      <button id="viewArchiveBtn">VIEW ARCHIVE</button>
+
       <div id="sessionList"></div>
     `;
     document.body.appendChild(panel);
 
     const newBtn = panel.querySelector("#newSessionBtn");
-    if (newBtn) {
-      newBtn.addEventListener("click", startNewSession);
-    }
+    if (newBtn) newBtn.addEventListener("click", startNewSession);
 
-    // Hook up filters
+    const deletedBtn = panel.querySelector("#viewDeletedBtn");
+    if (deletedBtn) deletedBtn.addEventListener("click", () => setSessionViewMode("deleted"));
+
+    const archiveBtn = panel.querySelector("#viewArchiveBtn");
+    if (archiveBtn) archiveBtn.addEventListener("click", () => setSessionViewMode("archive"));
+
     const hideFavCb       = panel.querySelector("#filterHideFav");
     const hideNonFavCb    = panel.querySelector("#filterHideNonFav");
     const hideOthersCb    = panel.querySelector("#filterHideOthers");
+if (hideOthersCb && hideOthersCb.checked) {
+  filters.hideOthers = true;
+}
     const hideSelfCb      = panel.querySelector("#filterHideSelf");
     const hideUserChatCb  = panel.querySelector("#filterHideUserChat");
     const searchInput     = panel.querySelector("#sessionSearchInput");
 
-    if (hideFavCb) {
-      hideFavCb.addEventListener("change", () => {
-        filters.hideFav = hideFavCb.checked;
-        renderSessionList();
-      });
-    }
-    if (hideNonFavCb) {
-      hideNonFavCb.addEventListener("change", () => {
-        filters.hideNonFav = hideNonFavCb.checked;
-        renderSessionList();
-      });
-    }
-    if (hideOthersCb) {
-      hideOthersCb.addEventListener("change", () => {
-        filters.hideOthers = hideOthersCb.checked;
-        renderSessionList();
-      });
-    }
-    if (hideSelfCb) {
-      hideSelfCb.addEventListener("change", () => {
-        filters.hideSelf = hideSelfCb.checked;
-        renderSessionList();
-      });
-    }
-    if (hideUserChatCb) {
-      hideUserChatCb.addEventListener("change", () => {
-        filters.hideUserChat = hideUserChatCb.checked;
-        applyUserChatFilter();
-      });
-    }
-    if (searchInput) {
-      searchInput.addEventListener("input", () => {
-        filters.searchTerm = searchInput.value.toLowerCase();
-        renderSessionList();
-      });
-    }
+    if (hideFavCb) hideFavCb.addEventListener("change", () => { filters.hideFav = hideFavCb.checked; renderSessionList(); });
+    if (hideNonFavCb) hideNonFavCb.addEventListener("change", () => { filters.hideNonFav = hideNonFavCb.checked; renderSessionList(); });
+    if (hideOthersCb) hideOthersCb.addEventListener("change", () => { filters.hideOthers = hideOthersCb.checked; renderSessionList(); });
+    if (hideSelfCb) hideSelfCb.addEventListener("change", () => { filters.hideSelf = hideSelfCb.checked; renderSessionList(); });
+    if (hideUserChatCb) hideUserChatCb.addEventListener("change", () => { filters.hideUserChat = hideUserChatCb.checked; applyUserChatFilter(); });
+    if (searchInput) searchInput.addEventListener("input", () => { filters.searchTerm = searchInput.value.toLowerCase(); renderSessionList(); });
 
-    // Context menu
     contextMenuEl = document.createElement("div");
     contextMenuEl.id = "sessionContextMenu";
-    contextMenuEl.innerHTML = `
-      <div data-menu-action="rename">Rename Session</div>
-      <div data-menu-action="delete">Delete Session</div>
-    `;
     document.body.appendChild(contextMenuEl);
 
     contextMenuEl.addEventListener("click", onContextMenuClick);
@@ -463,9 +462,6 @@ window.MeqChat = (function () {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // RIGHT INFO / ADS PANEL (RIGHT SIDE IN FULL CHAT MODE)
-  // ---------------------------------------------------------------------------
   function createRightInfoPanel() {
     if (document.getElementById("chatInfoPanel")) return;
 
@@ -489,21 +485,20 @@ window.MeqChat = (function () {
     currentSessionCreatedAt = null;
     state.messages          = [];
 
-    if (aiOutputEl) {
-      aiOutputEl.innerHTML = "";
-    }
+    if (aiOutputEl) aiOutputEl.innerHTML = "";
 
-    renderSessionList();
+    sessionViewMode = "active";
+    loadSessionList("active");
   }
 
   function upsertSession(id, createdAt, owner, title, favorite) {
     if (!id) return;
     const existing = sessions.find(s => s.id === id);
     if (existing) {
-      if (createdAt && !existing.created_at)     existing.created_at = createdAt;
-      if (typeof owner === "boolean")            existing.owner      = owner;
-      if (typeof title === "string")             existing.title      = title;
-      if (typeof favorite === "boolean")         existing.favorite   = favorite;
+      if (createdAt && !existing.created_at) existing.created_at = createdAt;
+      if (typeof owner === "boolean")        existing.owner      = owner;
+      if (typeof title === "string")         existing.title      = title;
+      if (typeof favorite === "boolean")     existing.favorite   = favorite;
     } else {
       sessions.push({
         id,
@@ -528,13 +523,11 @@ window.MeqChat = (function () {
     const term = filters.searchTerm || "";
 
     sessions.forEach(s => {
-      // Apply filters by meta
       if (filters.hideFav && s.favorite)      return;
       if (filters.hideNonFav && !s.favorite)  return;
       if (filters.hideOthers && !s.owner)     return;
       if (filters.hideSelf && s.owner)        return;
 
-      // Search filter
       if (term) {
         const base = (s.title && s.title.trim())
           ? s.title.trim()
@@ -547,12 +540,8 @@ window.MeqChat = (function () {
 
       const entry = document.createElement("div");
       entry.className = "session-entry";
-      if (s.id === currentSessionId) {
-        entry.classList.add("current");
-      }
-      if (s.owner) {
-        entry.classList.add("owned");
-      }
+      if (s.id === currentSessionId) entry.classList.add("current");
+      if (s.owner) entry.classList.add("owned");
 
       const labelSpan = document.createElement("span");
       labelSpan.className = "session-label";
@@ -561,29 +550,17 @@ window.MeqChat = (function () {
         ? s.title.trim()
         : (s.created_at || s.id);
 
-      const text = (s.id === currentSessionId)
-        ? `Current: ${base}`
-        : base;
-
-      labelSpan.textContent = text;
+      labelSpan.textContent = (s.id === currentSessionId) ? `Current: ${base}` : base;
       entry.appendChild(labelSpan);
 
-      // Favorite indicators
       if (s.owner) {
-        // Our own sessions: green interactive star
         const favBtn = document.createElement("button");
         favBtn.className = "fav-btn " + (s.favorite ? "solid" : "hollow");
         favBtn.textContent = s.favorite ? "★" : "☆";
         favBtn.title = s.favorite ? "Unfavorite" : "Favorite";
-
-        favBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          toggleFavorite(s.id);
-        });
-
+        favBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleFavorite(s.id); });
         entry.appendChild(favBtn);
       } else if (s.favorite) {
-        // Not owned by us, but favorited by its owner: red star
         const foreignFav = document.createElement("span");
         foreignFav.className = "fav-foreign";
         foreignFav.textContent = "★";
@@ -600,7 +577,13 @@ window.MeqChat = (function () {
 
       entry.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        if (!s.owner) return; // only owner can rename / delete
+        if (!s.owner) return;
+
+        // Archive view right-click only if eligible to restore
+        if (sessionViewMode === "archive" && !isArchiveRestoreAllowed(s)) {
+          return;
+        }
+
         showContextMenu(s.id, e.pageX, e.pageY);
       });
 
@@ -612,12 +595,14 @@ window.MeqChat = (function () {
     }
   }
 
-  async function loadSessionList() {
+  async function loadSessionList(mode = sessionViewMode) {
     try {
+      const action = getListActionForMode(mode);
+
       const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_sessions" })
+        body: JSON.stringify({ action })
       });
 
       if (!res.ok) return;
@@ -632,13 +617,12 @@ window.MeqChat = (function () {
 
   async function loadSessionFromServer(sessionId) {
     try {
+      const action = getLoadActionForMode(sessionViewMode);
+
       const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "load_session",
-          session_id: sessionId
-        })
+        body: JSON.stringify({ action, session_id: sessionId })
       });
 
       if (!res.ok) {
@@ -656,11 +640,8 @@ window.MeqChat = (function () {
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       state.messages = msgs;
 
-      if (aiOutputEl) {
-        aiOutputEl.innerHTML = "";
-      }
+      if (aiOutputEl) aiOutputEl.innerHTML = "";
 
-      // Re-render history with formatting (line breaks + inline code)
       msgs.forEach(msg => {
         const role    = msg.role || "";
         const content = msg.content || "";
@@ -748,27 +729,161 @@ window.MeqChat = (function () {
         })
       });
 
-      if (!res.ok) {
-        console.error("Failed to delete session", sessionId);
-      }
+      if (!res.ok) console.error("Failed to delete session", sessionId);
     } catch (err) {
       console.error("Error deleting session:", err);
     }
 
-    // Remove locally
     sessions = sessions.filter(x => x.id !== sessionId);
-    if (currentSessionId === sessionId) {
-      currentSessionId = null;
+    if (currentSessionId === sessionId) currentSessionId = null;
+    renderSessionList();
+  }
+
+  async function archiveSession(sessionId) {
+    const s = sessions.find(x => x.id === sessionId);
+    if (!s || !s.owner) return;
+
+    const ok = window.confirm("Archive this session? It will be moved to the archive folder.");
+    if (!ok) return;
+
+    try {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "archive_session",
+          session_id: sessionId
+        })
+      });
+
+      if (!res.ok) console.error("Failed to archive session", sessionId);
+    } catch (err) {
+      console.error("Error archiving session:", err);
     }
+
+    sessions = sessions.filter(x => x.id !== sessionId);
+    if (currentSessionId === sessionId) currentSessionId = null;
+    renderSessionList();
+  }
+
+  async function restoreSession(sessionId) {
+    const ok = window.confirm("Restore this session back to active sessions?");
+    if (!ok) return;
+
+    try {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "restore_session",
+          session_id: sessionId
+        })
+      });
+
+      if (!res.ok) console.error("Failed to restore session", sessionId);
+    } catch (err) {
+      console.error("Error restoring session:", err);
+    }
+
+    sessions = sessions.filter(x => x.id !== sessionId);
+    renderSessionList();
+  }
+
+  async function unarchiveSession(sessionId) {
+    const s = sessions.find(x => x.id === sessionId);
+    if (!s || !s.owner) return;
+
+    if (!isArchiveRestoreAllowed(s)) {
+      window.alert("This archive is too old to restore to active.");
+      return;
+    }
+
+    const ok = window.confirm("Move this archived session back to active?");
+    if (!ok) return;
+
+    try {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "unarchive_session",
+          session_id: sessionId
+        })
+      });
+
+      if (!res.ok) console.error("Failed to unarchive session", sessionId);
+    } catch (err) {
+      console.error("Error unarchiving session:", err);
+    }
+
+    sessions = sessions.filter(x => x.id !== sessionId);
+    if (currentSessionId === sessionId) currentSessionId = null;
+    renderSessionList();
+  }
+
+  async function trashSession(sessionId) {
+    const ok = window.confirm("Permanently delete this session? It will be moved to the trash folder.");
+    if (!ok) return;
+
+    try {
+      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "trash_session",
+          session_id: sessionId,
+          from: sessionViewMode
+        })
+      });
+
+      if (!res.ok) console.error("Failed to trash session", sessionId);
+    } catch (err) {
+      console.error("Error trashing session:", err);
+    }
+
+    sessions = sessions.filter(x => x.id !== sessionId);
+    if (currentSessionId === sessionId) currentSessionId = null;
     renderSessionList();
   }
 
   // ---------------------------------------------------------------------------
-  // CONTEXT MENU (RENAME / DELETE)
+  // CONTEXT MENU (MODE-AWARE)
   // ---------------------------------------------------------------------------
+  function buildContextMenuHtmlForMode(sessionObj) {
+    if (sessionViewMode === "active") {
+      return `
+        <div data-menu-action="rename">Rename Session</div>
+        <div data-menu-action="archive">Archive Session</div>
+        <div data-menu-action="delete">Delete Session</div>
+      `;
+    }
+
+    if (sessionViewMode === "deleted") {
+      return `
+        <div data-menu-action="restore">Restore Session</div>
+        <div data-menu-action="trash">Permanent Delete</div>
+      `;
+    }
+
+    if (sessionViewMode === "archive") {
+      // Only offered if recent enough (checked before showing menu)
+      return `
+        <div data-menu-action="unarchive">Restore to Active</div>
+      `;
+    }
+
+    return "";
+  }
+
   function showContextMenu(sessionId, x, y) {
     if (!contextMenuEl) return;
+
+    const s = sessions.find(z => z.id === sessionId) || null;
+    const html = buildContextMenuHtmlForMode(s);
+    if (!html.trim()) return;
+
     contextMenuSessionId = sessionId;
+    contextMenuEl.innerHTML = html;
     contextMenuEl.style.display = "block";
     contextMenuEl.style.left = x + "px";
     contextMenuEl.style.top = y + "px";
@@ -791,11 +906,19 @@ window.MeqChat = (function () {
       renameSession(sid);
     } else if (action === "delete") {
       deleteSession(sid);
+    } else if (action === "archive") {
+      archiveSession(sid);
+    } else if (action === "restore") {
+      restoreSession(sid);
+    } else if (action === "trash") {
+      trashSession(sid);
+    } else if (action === "unarchive") {
+      unarchiveSession(sid);
     }
   }
 
   // ---------------------------------------------------------------------------
-  // FULL CHAT MODE (EXPAND PANEL & HIDE OTHER BUTTONS + SHOW SIDE COLUMNS)
+  // FULL CHAT MODE
   // ---------------------------------------------------------------------------
   function installFullChatButton() {
     if (!fullChatBtn) return;
@@ -810,7 +933,6 @@ window.MeqChat = (function () {
         opacity: 0.9;
       }
 
-      /* Chat session panel (left) */
       #chatSessionPanel {
         position: fixed;
         left: 10px;
@@ -847,6 +969,25 @@ window.MeqChat = (function () {
       #chatSessionPanel #newSessionBtn:hover {
         background: #033;
       }
+
+      #chatSessionPanel #viewDeletedBtn,
+      #chatSessionPanel #viewArchiveBtn {
+        width: 100%;
+        margin-bottom: 6px;
+        padding: 4px;
+        background: #111;
+        color: #0ff;
+        border: 1px solid #0ff;
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: monospace;
+        font-size: 11px;
+      }
+      #chatSessionPanel #viewDeletedBtn:hover,
+      #chatSessionPanel #viewArchiveBtn:hover {
+        background: #033;
+      }
+
       #chatSessionPanel .session-entry {
         border-bottom: 1px solid #222;
         padding: 4px;
@@ -887,7 +1028,6 @@ window.MeqChat = (function () {
         opacity: 0.4;
       }
 
-      /* Filters at bottom of session panel */
       #sessionFilters {
         margin-top: 8px;
         border-top: 1px solid #222;
@@ -906,7 +1046,6 @@ window.MeqChat = (function () {
         margin-top: 4px;
       }
 
-      /* Right info/ads panel (right side) */
       #chatInfoPanel {
         position: fixed;
         right: 10px;
@@ -929,7 +1068,6 @@ window.MeqChat = (function () {
         color: #0ff;
       }
 
-      /* Context menu */
       #sessionContextMenu {
         position: absolute;
         display: none;
@@ -949,12 +1087,10 @@ window.MeqChat = (function () {
         background: #033;
       }
 
-      /* Hide original left segment panel in full chat */
       body.chat-full-active #segmentLog {
         display: none !important;
       }
 
-      /* Show chat side panels in full chat */
       body.chat-full-active #chatSessionPanel {
         display: block;
       }
@@ -962,7 +1098,6 @@ window.MeqChat = (function () {
         display: block;
       }
 
-      /* Expand middle chat panel between left + right columns */
       body.chat-full-active #rightPanel {
         position: fixed;
         left: 280px;
@@ -984,18 +1119,15 @@ window.MeqChat = (function () {
         display: block;
       }
 
-      /* Streamed text: preserve line breaks */
       #aiOutput .streamed-text {
         white-space: normal;
       }
 
-      /* Inline code / formulas */
       #aiOutput code {
         font-family: monospace;
         font-size: 11px;
       }
 
-      /* Play & copy buttons */
       #aiOutput .msg-play-btn,
       #aiOutput .msg-copy-btn {
         background: transparent;
@@ -1005,7 +1137,7 @@ window.MeqChat = (function () {
         padding: 0 3px;
       }
       #aiOutput .msg-play-btn {
-        color: #0f0; /* small green arrow */
+        color: #0f0;
         margin-right: 4px;
       }
       #aiOutput .msg-copy-btn {
@@ -1043,30 +1175,23 @@ window.MeqChat = (function () {
   installFullChatButton();
   createSessionPanel();
   createRightInfoPanel();
-  loadSessionList();
+  loadSessionList("active");
 
-  // Override the global appendAIMessage so existing code + room chat use formatter
   window.appendAIMessage = appendFormattedMessage;
 
-  // 🔹 Auto-activate FULL CHAT MODE once this file is loaded
   if (fullChatBtn) {
-    // Small timeout so the CSS + layout are ready, feels like a transition
     setTimeout(() => {
       if (!document.body.classList.contains("chat-full-active")) {
         fullChatBtn.click();
       }
-    }, 500); // tweak delay if you want a snappier/slower feel
+    }, 500);
   }
 
   return {
     send,
-
-    // expose current session id to other scripts (like slash commands)
     getCurrentSessionId: function () {
       return currentSessionId;
     },
-
-    // allow slash-proxy to create/adopt a session and update the left list
     adoptSessionFromSlash: function (meta) {
       if (!meta || !meta.session_id) return;
 
