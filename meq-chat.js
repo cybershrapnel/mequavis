@@ -5,6 +5,7 @@ window.MeqChat = (function () {
   const fullChatBtn   = document.querySelector('.action-btn[data-action="full-chat"]');
   const rightMiddleEl = document.getElementById("rightMiddle");
   const aiOutputEl    = document.getElementById("aiOutput");
+  const aiInputEl     = document.getElementById("aiInput");
 
   let currentSessionId        = null;
   let currentSessionCreatedAt = null;
@@ -36,6 +37,7 @@ window.MeqChat = (function () {
     sessionViewMode = mode;
     await loadSessionList(mode);
   }
+
   function isArchiveRestoreAllowed(sessionObj) {
     if (!sessionObj || !sessionObj.created_at) return false;
 
@@ -82,6 +84,682 @@ window.MeqChat = (function () {
   };
 
   // ---------------------------------------------------------------------------
+  // TOP-BAR TEXT + UI CONTROLS
+  // ---------------------------------------------------------------------------
+
+  const TEXT_PREFS_KEY = "meqChatTextPrefs_v2";
+  const UI_PREFS_KEY   = "meqChatUiPrefs_v1";
+
+  function getDefaultTextPrefs() {
+    let defaultSize = 11;
+    let defaultColor = "#00ffff";
+    let defaultFont = "inherit";
+
+    try {
+      const refEl = aiOutputEl || document.body;
+      const cs = window.getComputedStyle(refEl);
+      const fs = parseFloat(cs.fontSize);
+      if (!Number.isNaN(fs) && fs > 0) defaultSize = fs;
+
+      const col = cs.color;
+      const m = col && col.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (m) defaultColor = rgbToHex(+m[1], +m[2], +m[3]);
+
+      const fam = cs.fontFamily;
+      if (fam) defaultFont = fam;
+    } catch (e) {}
+
+    return {
+      fontSizePx: defaultSize,
+      baseColorHex: defaultColor,
+      hueOffsetDeg: 0,
+      fontFamily: defaultFont
+    };
+  }
+
+  function getDefaultUiPrefs() {
+    return {
+      baseUiHex: "#00ffff",
+      uiHueOffsetDeg: 0
+    };
+  }
+
+  const INITIAL_TEXT_DEFAULTS = (() => {
+    const d = getDefaultTextPrefs();
+    d.baseColorHex = "#00ffff";
+    d.hueOffsetDeg = 0;
+    d.fontFamily   = "inherit";
+    return d;
+  })();
+
+  const INITIAL_UI_DEFAULTS = (() => {
+    const d = getDefaultUiPrefs();
+    d.baseUiHex = "#00ffff";
+    d.uiHueOffsetDeg = 0;
+    return d;
+  })();
+
+  let textPrefs = (() => {
+    try {
+      const raw = localStorage.getItem(TEXT_PREFS_KEY);
+      if (raw) {
+        const j = JSON.parse(raw);
+        if (j && typeof j === "object") {
+          const d = INITIAL_TEXT_DEFAULTS;
+          return {
+            fontSizePx: typeof j.fontSizePx === "number" ? j.fontSizePx : d.fontSizePx,
+            baseColorHex: typeof j.baseColorHex === "string" ? j.baseColorHex : d.baseColorHex,
+            hueOffsetDeg: typeof j.hueOffsetDeg === "number" ? j.hueOffsetDeg : d.hueOffsetDeg,
+            fontFamily: typeof j.fontFamily === "string" ? j.fontFamily : d.fontFamily
+          };
+        }
+      }
+    } catch (e) {}
+    return { ...INITIAL_TEXT_DEFAULTS };
+  })();
+
+  let uiPrefs = (() => {
+    try {
+      const raw = localStorage.getItem(UI_PREFS_KEY);
+      if (raw) {
+        const j = JSON.parse(raw);
+        if (j && typeof j === "object") {
+          const d = INITIAL_UI_DEFAULTS;
+          return {
+            baseUiHex: typeof j.baseUiHex === "string" ? j.baseUiHex : d.baseUiHex,
+            uiHueOffsetDeg: typeof j.uiHueOffsetDeg === "number" ? j.uiHueOffsetDeg : d.uiHueOffsetDeg
+          };
+        }
+      }
+    } catch (e) {}
+    return { ...INITIAL_UI_DEFAULTS };
+  })();
+
+  function saveTextPrefs() {
+    try { localStorage.setItem(TEXT_PREFS_KEY, JSON.stringify(textPrefs)); } catch (e) {}
+  }
+  function saveUiPrefs() {
+    try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(uiPrefs)); } catch (e) {}
+  }
+
+  function applyTextPrefs() {
+    const targetEls = [];
+    if (aiOutputEl) targetEls.push(aiOutputEl);
+    if (aiInputEl)  targetEls.push(aiInputEl);
+
+    const finalColor = applyHueOffsetToHex(textPrefs.baseColorHex, textPrefs.hueOffsetDeg);
+
+    targetEls.forEach(el => {
+      el.style.fontSize   = textPrefs.fontSizePx + "px";
+      el.style.color      = finalColor;
+      el.style.fontFamily = textPrefs.fontFamily;
+    });
+  }
+
+  function applyUiPrefs() {
+    const accentHex = applyHueOffsetToHex(uiPrefs.baseUiHex, uiPrefs.uiHueOffsetDeg);
+
+    document.documentElement.style.setProperty("--meq-accent", accentHex);
+
+    let styleEl = document.getElementById("meqUiAccentOverride");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "meqUiAccentOverride";
+      document.head.appendChild(styleEl);
+    }
+
+    styleEl.textContent = `
+      :root { --meq-accent: ${accentHex}; }
+
+      /* Borders */
+      #chatSessionPanel,
+      #chatInfoPanel,
+      #sessionContextMenu,
+      #rightPanel,
+      #rightTop,
+      #aiInput,
+      #aiOutput,
+      #meqTopControlWrap .meq-mini-btn,
+      #meqTopControlWrap select,
+      #meqTopControlWrap input[type="range"],
+      #meqTopControlWrap input[type="color"],
+      #sessionSearchInput,
+      #modelSelect {
+        border-color: var(--meq-accent) !important;
+      }
+
+      /* UI text color (chrome + labels + panels + Model: + news area) */
+      #chatSessionPanel,
+      #chatInfoPanel,
+      #chatInfoPanel *,
+      #sessionContextMenu,
+      #meqTopControlWrap,
+      #meqTopControlWrap .meq-mini-btn,
+      #meqTopControlWrap .meq-mini-label,
+      #meqTopControlWrap select,
+      #rightTop,
+      #rightTop label,
+      #rightTop span,
+      #modelSelect,
+      #modelSelect option {
+        color: var(--meq-accent) !important;
+      }
+
+      /* Make sure model select background stays dark */
+      #modelSelect,
+      #modelSelect option {
+        background: #000 !important;
+      }
+
+      /* General buttons/menus follow accent (NOTE: leaves background alone) */
+      #chatSessionPanel button,
+      #chatInfoPanel button,
+      #rightPanel button,
+      #rightPanel input[type="button"],
+      #rightPanel input[type="submit"],
+      #rightTop .action-btn,
+      #sessionContextMenu div {
+        border-color: var(--meq-accent) !important;
+        color: var(--meq-accent) !important;
+      }
+
+      /* AI action icons */
+      #aiOutput .msg-copy-btn,
+      #aiOutput .msg-play-btn,
+      #chatSessionPanel .fav-btn,
+      #chatSessionPanel .fav-foreign {
+        color: var(--meq-accent) !important;
+      }
+
+      /* Scrollbars */
+      body,
+      #chatSessionPanel,
+      #chatInfoPanel,
+      #aiOutput,
+      #rightMiddle {
+        scrollbar-color: var(--meq-accent) #050505;
+      }
+      body::-webkit-scrollbar,
+      #chatSessionPanel::-webkit-scrollbar,
+      #chatInfoPanel::-webkit-scrollbar,
+      #aiOutput::-webkit-scrollbar,
+      #rightMiddle::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      body::-webkit-scrollbar-track,
+      #chatSessionPanel::-webkit-scrollbar-track,
+      #chatInfoPanel::-webkit-scrollbar-track,
+      #aiOutput::-webkit-scrollbar-track,
+      #rightMiddle::-webkit-scrollbar-track {
+        background: #050505;
+      }
+      body::-webkit-scrollbar-thumb,
+      #chatSessionPanel::-webkit-scrollbar-thumb,
+      #chatInfoPanel::-webkit-scrollbar-thumb,
+      #aiOutput::-webkit-scrollbar-thumb,
+      #rightMiddle::-webkit-scrollbar-thumb {
+        background: var(--meq-accent);
+        border-radius: 8px;
+        border: 2px solid #050505;
+      }
+
+      /* glow */
+      #chatSessionPanel,
+      #chatInfoPanel,
+      #meqTopControlWrap .meq-mini-btn {
+        box-shadow: 0 0 8px color-mix(in srgb, var(--meq-accent) 40%, transparent) !important;
+      }
+
+      /* --- SEND BUTTON SPECIAL CASE ---
+         IMPORTANT: use higher specificity than #rightPanel button */
+      #rightPanel #aiSend,
+      #aiSend,
+      #rightPanel .send-btn,
+      #rightPanel .chat-send,
+      #rightPanel .meq-send-btn,
+      #rightPanel input[type="submit"],
+      #rightPanel button[type="submit"],
+      #sendBtn {
+        background: var(--meq-accent) !important;
+        border-color: var(--meq-accent) !important;
+        color: #000 !important;        /* text stays black */
+        font-weight: 700;
+      }
+
+      #rightPanel #aiSend:hover,
+      #aiSend:hover,
+      #rightPanel .send-btn:hover,
+      #rightPanel .chat-send:hover,
+      #rightPanel .meq-send-btn:hover,
+      #rightPanel input[type="submit"]:hover,
+      #rightPanel button[type="submit"]:hover,
+      #sendBtn:hover {
+        background: color-mix(in srgb, var(--meq-accent) 85%, #fff) !important;
+        border-color: var(--meq-accent) !important;
+        color: #000 !important;
+      }
+    `;
+
+    // --- Hard fail-safe: directly apply to known elements in case late CSS rewrites inline styles
+    try {
+      if (modelSelect) {
+        modelSelect.style.borderColor = accentHex;
+        modelSelect.style.color = accentHex;
+        modelSelect.style.background = "#000";
+      }
+      const aiSendBtn = document.getElementById("aiSend");
+      if (aiSendBtn) {
+        aiSendBtn.style.background = accentHex;
+        aiSendBtn.style.borderColor = accentHex;
+        aiSendBtn.style.color = "#000";
+      }
+    } catch (e) {}
+  }
+
+  function initTopTextControls() {
+    if (!modelSelect) return;
+    const parent = modelSelect.parentElement;
+    if (!parent) return;
+
+    if (document.getElementById("meqTopControlWrap")) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "meqTopControlWrap";
+    wrap.style.cssText = `
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:6px;
+      width:100%;
+    `;
+
+    parent.insertBefore(wrap, modelSelect);
+    wrap.appendChild(modelSelect);
+
+    const style = document.createElement("style");
+    style.textContent = `
+/* --- Chat Sessions panel should follow accent --- */
+#chatSessionPanel {
+  position: fixed;
+  left: 10px;
+  top: 60px;
+  width: 260px;
+  height: calc(100vh - 70px);
+  background: #050505;
+
+  border: 1px solid var(--meq-accent) !important;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--meq-accent) !important;
+  overflow-y: auto;
+  z-index: 998;
+  display: none;
+}
+#chatSessionPanel h2 {
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: var(--meq-accent) !important;
+}
+
+/* Buttons in chat sessions */
+#chatSessionPanel #newSessionBtn,
+#chatSessionPanel #viewDeletedBtn,
+#chatSessionPanel #viewArchiveBtn {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px;
+  background: #111;
+
+  color: var(--meq-accent) !important;
+  border: 1px solid var(--meq-accent) !important;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+      #meqTopControlWrap .meq-mini-btn {
+        background:#111;
+        color:#0ff;
+        border:1px solid #0ff;
+        border-radius:4px;
+        padding:2px 6px;
+        cursor:pointer;
+        font-family:monospace;
+        font-size:11px;
+        line-height:1.2;
+      }
+      #meqTopControlWrap .meq-mini-btn:hover { background:#033; }
+      #meqTopControlWrap .meq-mini-label {
+        font-family:monospace;
+        font-size:11px;
+        color:#0ff;
+        opacity:0.9;
+        margin-left:2px;
+        margin-right:2px;
+        white-space:nowrap;
+      }
+      #meqTopControlWrap select,
+      #meqTopControlWrap input[type="color"],
+      #meqTopControlWrap input[type="range"] {
+        background:#050505;
+        color:#0ff;
+        border:1px solid #0ff;
+        border-radius:4px;
+        font-family:monospace;
+        font-size:11px;
+        padding:2px 4px;
+      }
+      #meqTopControlWrap input[type="range"] {
+        height: 14px;
+      }
+    `;
+    document.head.appendChild(style);
+
+    // GROUP 1
+    const groupFont = document.createElement("div");
+    groupFont.style.cssText = `
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
+      white-space:nowrap;
+    `;
+
+    const minusBtn = document.createElement("button");
+    minusBtn.className = "meq-mini-btn";
+    minusBtn.textContent = "−";
+    minusBtn.title = "Decrease font size";
+
+    const plusBtn = document.createElement("button");
+    plusBtn.className = "meq-mini-btn";
+    plusBtn.textContent = "+";
+    plusBtn.title = "Increase font size";
+
+    const sizeLabel = document.createElement("span");
+    sizeLabel.className = "meq-mini-label";
+    sizeLabel.id = "meqFontSizeLabel";
+
+    function updateSizeLabel() {
+      sizeLabel.textContent = `${Math.round(textPrefs.fontSizePx)}px`;
+    }
+
+    minusBtn.addEventListener("click", () => {
+      textPrefs.fontSizePx = clamp(textPrefs.fontSizePx - 1, 8, 32);
+      updateSizeLabel();
+      applyTextPrefs();
+      saveTextPrefs();
+    });
+
+    plusBtn.addEventListener("click", () => {
+      textPrefs.fontSizePx = clamp(textPrefs.fontSizePx + 1, 8, 32);
+      updateSizeLabel();
+      applyTextPrefs();
+      saveTextPrefs();
+    });
+
+    const fontLabel = document.createElement("span");
+    fontLabel.className = "meq-mini-label";
+    fontLabel.textContent = "Font";
+
+    const fontSelect = document.createElement("select");
+    fontSelect.title = "Change chat font";
+
+    const FONT_OPTIONS = [
+      { label: "Default", value: "inherit" },
+      { label: "Monospace", value: "monospace" },
+      { label: "Courier New", value: '"Courier New", monospace' },
+      { label: "Arial", value: "Arial, sans-serif" },
+      { label: "Verdana", value: "Verdana, sans-serif" },
+      { label: "Georgia", value: "Georgia, serif" },
+      { label: "Times", value: '"Times New Roman", serif' }
+    ];
+
+    FONT_OPTIONS.forEach(opt => {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      fontSelect.appendChild(o);
+    });
+
+    const initialFont = textPrefs.fontFamily || "inherit";
+    const match = FONT_OPTIONS.find(o => o.value === initialFont);
+    fontSelect.value = match ? match.value : "inherit";
+
+    fontSelect.addEventListener("change", () => {
+      textPrefs.fontFamily = fontSelect.value;
+      applyTextPrefs();
+      saveTextPrefs();
+    });
+
+    groupFont.appendChild(minusBtn);
+    groupFont.appendChild(plusBtn);
+    groupFont.appendChild(sizeLabel);
+    groupFont.appendChild(fontLabel);
+    groupFont.appendChild(fontSelect);
+    wrap.appendChild(groupFont);
+
+    // GROUP 2
+    const groupText = document.createElement("div");
+    groupText.style.cssText = `
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
+      white-space:nowrap;
+    `;
+
+    const colorLabel = document.createElement("span");
+    colorLabel.className = "meq-mini-label";
+    colorLabel.textContent = "Text";
+
+    const colorPicker = document.createElement("input");
+    colorPicker.type = "color";
+    colorPicker.value = textPrefs.baseColorHex;
+    colorPicker.title = "Pick base text color";
+
+    const hueLabel = document.createElement("span");
+    hueLabel.className = "meq-mini-label";
+    hueLabel.textContent = "Hue";
+
+    const hueSlider = document.createElement("input");
+    hueSlider.type = "range";
+    hueSlider.min = "-180";
+    hueSlider.max = "180";
+    hueSlider.step = "1";
+    hueSlider.value = String(textPrefs.hueOffsetDeg || 0);
+    hueSlider.title = "Shift hue of text color";
+    hueSlider.style.width = "80px";
+
+    colorPicker.addEventListener("input", () => {
+      textPrefs.baseColorHex = colorPicker.value;
+      applyTextPrefs();
+      saveTextPrefs();
+    });
+
+    hueSlider.addEventListener("input", () => {
+      textPrefs.hueOffsetDeg = parseInt(hueSlider.value, 10) || 0;
+      applyTextPrefs();
+      saveTextPrefs();
+    });
+
+    groupText.appendChild(colorLabel);
+    groupText.appendChild(colorPicker);
+    groupText.appendChild(hueLabel);
+    groupText.appendChild(hueSlider);
+    wrap.appendChild(groupText);
+
+    // GROUP 3
+    const groupUi = document.createElement("div");
+    groupUi.style.cssText = `
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
+      white-space:nowrap;
+    `;
+
+    const uiLabel = document.createElement("span");
+    uiLabel.className = "meq-mini-label";
+    uiLabel.textContent = "UI";
+
+    const uiColorPicker = document.createElement("input");
+    uiColorPicker.type = "color";
+    uiColorPicker.value = uiPrefs.baseUiHex;
+    uiColorPicker.title = "Pick base UI accent color";
+
+    const uiHueLabel = document.createElement("span");
+    uiHueLabel.className = "meq-mini-label";
+    uiHueLabel.textContent = "Hue";
+
+    const uiHueSlider = document.createElement("input");
+    uiHueSlider.type = "range";
+    uiHueSlider.min = "-180";
+    uiHueSlider.max = "180";
+    uiHueSlider.step = "1";
+    uiHueSlider.value = String(uiPrefs.uiHueOffsetDeg || 0);
+    uiHueSlider.title = "Shift hue of UI accent color";
+    uiHueSlider.style.width = "80px";
+
+    uiColorPicker.addEventListener("input", () => {
+      uiPrefs.baseUiHex = uiColorPicker.value;
+      applyUiPrefs();
+      saveUiPrefs();
+    });
+
+    uiHueSlider.addEventListener("input", () => {
+      uiPrefs.uiHueOffsetDeg = parseInt(uiHueSlider.value, 10) || 0;
+      applyUiPrefs();
+      saveUiPrefs();
+    });
+
+    groupUi.appendChild(uiLabel);
+    groupUi.appendChild(uiColorPicker);
+    groupUi.appendChild(uiHueLabel);
+    groupUi.appendChild(uiHueSlider);
+    wrap.appendChild(groupUi);
+
+    // GROUP 4
+    const resetGroup = document.createElement("div");
+    resetGroup.style.cssText = `
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
+      white-space:nowrap;
+    `;
+
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "meq-mini-btn";
+    resetBtn.textContent = "Reset Defaults";
+    resetBtn.title = "Reset text + UI settings to defaults";
+
+    resetBtn.addEventListener("click", () => {
+      textPrefs = { ...INITIAL_TEXT_DEFAULTS };
+      uiPrefs   = { ...INITIAL_UI_DEFAULTS };
+
+      colorPicker.value = textPrefs.baseColorHex;
+      hueSlider.value   = String(textPrefs.hueOffsetDeg || 0);
+      fontSelect.value  = "inherit";
+      updateSizeLabel();
+
+      uiColorPicker.value = uiPrefs.baseUiHex;
+      uiHueSlider.value   = String(uiPrefs.uiHueOffsetDeg || 0);
+
+      applyTextPrefs();
+      applyUiPrefs();
+      saveTextPrefs();
+      saveUiPrefs();
+    });
+
+    resetGroup.appendChild(resetBtn);
+    wrap.appendChild(resetGroup);
+
+    updateSizeLabel();
+    applyTextPrefs();
+    applyUiPrefs();
+  }
+
+  // --- Color math helpers (hex <-> HSL) ---
+  function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+
+  function hexToRgb(hex) {
+    const h = (hex || "").replace("#", "").trim();
+    if (h.length === 3) {
+      const r = parseInt(h[0] + h[0], 16);
+      const g = parseInt(h[1] + h[1], 16);
+      const b = parseInt(h[2] + h[2], 16);
+      return { r, g, b };
+    }
+    if (h.length !== 6) return null;
+    const r = parseInt(h.slice(0,2), 16);
+    const g = parseInt(h.slice(2,4), 16);
+    const b = parseInt(h.slice(4,6), 16);
+    if ([r,g,b].some(x => Number.isNaN(x))) return null;
+    return { r, g, b };
+  }
+
+  function rgbToHex(r, g, b) {
+    const toHex = (v) => {
+      const s = clamp(Math.round(v), 0, 255).toString(16);
+      return s.length === 1 ? "0" + s : s;
+    };
+    return "#" + toHex(r) + toHex(g) + toHex(b);
+  }
+
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h, s, l = (max + min) / 2;
+
+    if (max === min) {
+      h = s = 0;
+    } else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        default: h = (r - g) / d + 4; break;
+      }
+      h *= 60;
+    }
+    return { h, s, l };
+  }
+
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+    const m = l - c/2;
+    let r1=0, g1=0, b1=0;
+
+    if (h < 60)      { r1=c; g1=x; b1=0; }
+    else if (h < 120){ r1=x; g1=c; b1=0; }
+    else if (h < 180){ r1=0; g1=c; b1=x; }
+    else if (h < 240){ r1=0; g1=x; b1=c; }
+    else if (h < 300){ r1=x; g1=0; b1=c; }
+    else             { r1=c; g1=0; b1=x; }
+
+    return {
+      r: (r1 + m) * 255,
+      g: (g1 + m) * 255,
+      b: (b1 + m) * 255
+    };
+  }
+
+  function applyHueOffsetToHex(hex, offsetDeg) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    const newH = hsl.h + (offsetDeg || 0);
+    const outRgb = hslToRgb(newH, hsl.s, hsl.l);
+    return rgbToHex(outRgb.r, outRgb.g, outRgb.b);
+  }
+
+  // ---------------------------------------------------------------------------
   // EVE SPEECH CONTROL FROM CHAT
   // ---------------------------------------------------------------------------
   let lastEveSpeechText = null;
@@ -98,23 +776,17 @@ window.MeqChat = (function () {
 
     const overlay = window.meqEveOverlay;
     const isSpeaking = !!overlay.isSpeaking;
-
     const sameAsLast = (lastEveSpeechText === trimmed);
 
     if (sameAsLast && isSpeaking) {
-      if (typeof overlay.stopSpeech === "function") {
-        overlay.stopSpeech();
-      }
+      if (typeof overlay.stopSpeech === "function") overlay.stopSpeech();
       return;
     }
 
     overlay.setSpeechText(trimmed);
 
-    if (typeof overlay.speak === "function") {
-      overlay.speak();
-    } else {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
-    }
+    if (typeof overlay.speak === "function") overlay.speak();
+    else window.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
 
     lastEveSpeechText = trimmed;
   }
@@ -167,13 +839,9 @@ window.MeqChat = (function () {
     state.messages.push({ role: "assistant", content: reply });
 
     let label;
-    if (provider === "openai") {
-      label = `OpenAI (${model})`;
-    } else if (provider === "gemini") {
-      label = `Gemini (${model})`;
-    } else {
-      label = provider.toUpperCase();
-    }
+    if (provider === "openai") label = `OpenAI (${model})`;
+    else if (provider === "gemini") label = `Gemini (${model})`;
+    else label = provider.toUpperCase();
 
     try {
       if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
@@ -272,15 +940,10 @@ window.MeqChat = (function () {
     const msgDiv = document.createElement("div");
     msgDiv.className = "msg";
 
-    if (isAISender(sender)) {
-      msgDiv.classList.add("msg-ai");
-    } else if (sender === "You" || sender === "User Query") {
-      msgDiv.classList.add("msg-self");
-    } else if (sender === "System") {
-      msgDiv.classList.add("msg-system");
-    } else {
-      msgDiv.classList.add("msg-user");
-    }
+    if (isAISender(sender)) msgDiv.classList.add("msg-ai");
+    else if (sender === "You" || sender === "User Query") msgDiv.classList.add("msg-self");
+    else if (sender === "System") msgDiv.classList.add("msg-system");
+    else msgDiv.classList.add("msg-user");
 
     const senderSpan = document.createElement("span");
     senderSpan.className = "sender";
@@ -298,17 +961,13 @@ window.MeqChat = (function () {
       playBtn.className = "msg-play-btn";
       playBtn.title = "Make Eve say this";
       playBtn.textContent = "▶";
-      playBtn.addEventListener("click", () => {
-        playEveForText(text);
-      });
+      playBtn.addEventListener("click", () => playEveForText(text));
 
       copyBtn = document.createElement("button");
       copyBtn.className = "msg-copy-btn";
       copyBtn.title = "Copy response to clipboard";
       copyBtn.textContent = "📋";
-      copyBtn.addEventListener("click", () => {
-        copyToClipboard(text);
-      });
+      copyBtn.addEventListener("click", () => copyToClipboard(text));
     }
 
     if (playBtn) msgDiv.appendChild(playBtn);
@@ -349,17 +1008,13 @@ window.MeqChat = (function () {
     playBtn.className = "msg-play-btn";
     playBtn.title = "Make Eve say this";
     playBtn.textContent = "▶";
-    playBtn.addEventListener("click", () => {
-      playEveForText(fullText);
-    });
+    playBtn.addEventListener("click", () => playEveForText(fullText));
 
     const copyBtn = document.createElement("button");
     copyBtn.className = "msg-copy-btn";
     copyBtn.title = "Copy response to clipboard";
     copyBtn.textContent = "📋";
-    copyBtn.addEventListener("click", () => {
-      copyToClipboard(fullText);
-    });
+    copyBtn.addEventListener("click", () => copyToClipboard(fullText));
 
     msgDiv.appendChild(playBtn);
     msgDiv.appendChild(senderSpan);
@@ -436,9 +1091,7 @@ window.MeqChat = (function () {
     const hideFavCb       = panel.querySelector("#filterHideFav");
     const hideNonFavCb    = panel.querySelector("#filterHideNonFav");
     const hideOthersCb    = panel.querySelector("#filterHideOthers");
-if (hideOthersCb && hideOthersCb.checked) {
-  filters.hideOthers = true;
-}
+    if (hideOthersCb && hideOthersCb.checked) filters.hideOthers = true;
     const hideSelfCb      = panel.querySelector("#filterHideSelf");
     const hideUserChatCb  = panel.querySelector("#filterHideUserChat");
     const searchInput     = panel.querySelector("#sessionSearchInput");
@@ -579,20 +1232,14 @@ if (hideOthersCb && hideOthersCb.checked) {
         e.preventDefault();
         if (!s.owner) return;
 
-        // Archive view right-click only if eligible to restore
-        if (sessionViewMode === "archive" && !isArchiveRestoreAllowed(s)) {
-          return;
-        }
-
+        if (sessionViewMode === "archive" && !isArchiveRestoreAllowed(s)) return;
         showContextMenu(s.id, e.pageX, e.pageY);
       });
 
       listEl.appendChild(entry);
     });
 
-    if (!any) {
-      listEl.innerHTML = `<div class="session-entry">No sessions match filters</div>`;
-    }
+    if (!any) listEl.innerHTML = `<div class="session-entry">No sessions match filters</div>`;
   }
 
   async function loadSessionList(mode = sessionViewMode) {
@@ -866,7 +1513,6 @@ if (hideOthersCb && hideOthersCb.checked) {
     }
 
     if (sessionViewMode === "archive") {
-      // Only offered if recent enough (checked before showing menu)
       return `
         <div data-menu-action="unarchive">Restore to Active</div>
       `;
@@ -902,19 +1548,12 @@ if (hideOthersCb && hideOthersCb.checked) {
     const sid = contextMenuSessionId;
     hideContextMenu();
 
-    if (action === "rename") {
-      renameSession(sid);
-    } else if (action === "delete") {
-      deleteSession(sid);
-    } else if (action === "archive") {
-      archiveSession(sid);
-    } else if (action === "restore") {
-      restoreSession(sid);
-    } else if (action === "trash") {
-      trashSession(sid);
-    } else if (action === "unarchive") {
-      unarchiveSession(sid);
-    }
+    if (action === "rename") renameSession(sid);
+    else if (action === "delete") deleteSession(sid);
+    else if (action === "archive") archiveSession(sid);
+    else if (action === "restore") restoreSession(sid);
+    else if (action === "trash") trashSession(sid);
+    else if (action === "unarchive") unarchiveSession(sid);
   }
 
   // ---------------------------------------------------------------------------
@@ -940,11 +1579,11 @@ if (hideOthersCb && hideOthersCb.checked) {
         width: 260px;
         height: calc(100vh - 70px);
         background: #050505;
-        border: 1px solid #0ff;
+        border: 1px solid var(--meq-accent);
         padding: 8px;
         font-family: monospace;
         font-size: 11px;
-        color: #0ff;
+        color: var(--meq-accent);
         overflow-y: auto;
         z-index: 998;
         display: none;
@@ -952,23 +1591,21 @@ if (hideOthersCb && hideOthersCb.checked) {
       #chatSessionPanel h2 {
         font-size: 12px;
         margin-bottom: 4px;
-        color: #0ff;
+        color: var(--meq-accent);
       }
       #chatSessionPanel #newSessionBtn {
         width: 100%;
         margin-bottom: 6px;
         padding: 4px;
         background: #111;
-        color: #0ff;
-        border: 1px solid #0ff;
+        color: var(--meq-accent);
+        border: 1px solid var(--meq-accent);
         border-radius: 4px;
         cursor: pointer;
         font-family: monospace;
         font-size: 11px;
       }
-      #chatSessionPanel #newSessionBtn:hover {
-        background: #033;
-      }
+      #chatSessionPanel #newSessionBtn:hover { background: #033; }
 
       #chatSessionPanel #viewDeletedBtn,
       #chatSessionPanel #viewArchiveBtn {
@@ -976,17 +1613,15 @@ if (hideOthersCb && hideOthersCb.checked) {
         margin-bottom: 6px;
         padding: 4px;
         background: #111;
-        color: #0ff;
-        border: 1px solid #0ff;
+        color: var(--meq-accent);
+        border: 1px solid var(--meq-accent);
         border-radius: 4px;
         cursor: pointer;
         font-family: monospace;
         font-size: 11px;
       }
       #chatSessionPanel #viewDeletedBtn:hover,
-      #chatSessionPanel #viewArchiveBtn:hover {
-        background: #033;
-      }
+      #chatSessionPanel #viewArchiveBtn:hover { background: #033; }
 
       #chatSessionPanel .session-entry {
         border-bottom: 1px solid #222;
@@ -997,15 +1632,9 @@ if (hideOthersCb && hideOthersCb.checked) {
         justify-content: space-between;
         gap: 6px;
       }
-      #chatSessionPanel .session-entry:hover {
-        background: #033;
-      }
-      #chatSessionPanel .session-entry.current {
-        background: #022;
-      }
-      #chatSessionPanel .session-entry.owned {
-        border-left: 2px solid #0f0;
-      }
+      #chatSessionPanel .session-entry:hover { background: #033; }
+      #chatSessionPanel .session-entry.current { background: #022; }
+      #chatSessionPanel .session-entry.owned { border-left: 2px solid #0f0; }
       #chatSessionPanel .session-label {
         flex: 1 1 auto;
         white-space: nowrap;
@@ -1020,13 +1649,8 @@ if (hideOthersCb && hideOthersCb.checked) {
         cursor: pointer;
         font-size: 13px;
       }
-      #chatSessionPanel .fav-btn.solid {
-        color: #0f0;
-      }
-      #chatSessionPanel .fav-btn.hollow {
-        color: #0f0;
-        opacity: 0.4;
-      }
+      #chatSessionPanel .fav-btn.solid { color: #0f0; }
+      #chatSessionPanel .fav-btn.hollow { color: #0f0; opacity: 0.4; }
 
       #sessionFilters {
         margin-top: 8px;
@@ -1034,17 +1658,9 @@ if (hideOthersCb && hideOthersCb.checked) {
         padding-top: 4px;
         font-size: 10px;
       }
-      #sessionFilters label {
-        display: block;
-        margin-top: 2px;
-        cursor: pointer;
-      }
-      #sessionFilters input[type="checkbox"] {
-        margin-right: 4px;
-      }
-      #sessionSearchWrap {
-        margin-top: 4px;
-      }
+      #sessionFilters label { display: block; margin-top: 2px; cursor: pointer; }
+      #sessionFilters input[type="checkbox"] { margin-right: 4px; }
+      #sessionSearchWrap { margin-top: 4px; }
 
       #chatInfoPanel {
         position: fixed;
@@ -1053,50 +1669,34 @@ if (hideOthersCb && hideOthersCb.checked) {
         width: 260px;
         height: calc(100vh - 70px);
         background: #050505;
-        border: 1px solid #0ff;
+        border: 1px solid var(--meq-accent);
         padding: 8px;
         font-family: monospace;
         font-size: 11px;
-        color: #0ff;
+        color: var(--meq-accent);
         overflow-y: auto;
         z-index: 998;
         display: none;
       }
-      #chatInfoPanel h2 {
-        font-size: 12px;
-        margin-bottom: 4px;
-        color: #0ff;
-      }
+      #chatInfoPanel h2 { font-size: 12px; margin-bottom: 4px; color: var(--meq-accent); }
 
       #sessionContextMenu {
         position: absolute;
         display: none;
         background: #111;
-        border: 1px solid #0ff;
+        border: 1px solid var(--meq-accent);
         font-family: monospace;
         font-size: 11px;
-        color: #0ff;
+        color: var(--meq-accent);
         z-index: 2000;
         min-width: 140px;
       }
-      #sessionContextMenu div {
-        padding: 4px 8px;
-        cursor: pointer;
-      }
-      #sessionContextMenu div:hover {
-        background: #033;
-      }
+      #sessionContextMenu div { padding: 4px 8px; cursor: pointer; }
+      #sessionContextMenu div:hover { background: #033; }
 
-      body.chat-full-active #segmentLog {
-        display: none !important;
-      }
-
-      body.chat-full-active #chatSessionPanel {
-        display: block;
-      }
-      body.chat-full-active #chatInfoPanel {
-        display: block;
-      }
+      body.chat-full-active #segmentLog { display: none !important; }
+      body.chat-full-active #chatSessionPanel { display: block; }
+      body.chat-full-active #chatInfoPanel { display: block; }
 
       body.chat-full-active #rightPanel {
         position: fixed;
@@ -1109,24 +1709,12 @@ if (hideOthersCb && hideOthersCb.checked) {
         z-index: 999;
       }
 
-      body.chat-full-active #rightTop {
-        flex: 0 0 auto;
-      }
-      body.chat-full-active #rightTop .action-btn {
-        display: none;
-      }
-      body.chat-full-active #rightTop .action-btn[data-action="full-chat"] {
-        display: block;
-      }
+      body.chat-full-active #rightTop { flex: 0 0 auto; }
+      body.chat-full-active #rightTop .action-btn { display: none; }
+      body.chat-full-active #rightTop .action-btn[data-action="full-chat"] { display: block; }
 
-      #aiOutput .streamed-text {
-        white-space: normal;
-      }
-
-      #aiOutput code {
-        font-family: monospace;
-        font-size: 11px;
-      }
+      #aiOutput .streamed-text { white-space: normal; }
+      #aiOutput code { font-family: monospace; font-size: 11px; }
 
       #aiOutput .msg-play-btn,
       #aiOutput .msg-copy-btn {
@@ -1136,18 +1724,10 @@ if (hideOthersCb && hideOthersCb.checked) {
         font-size: 11px;
         padding: 0 3px;
       }
-      #aiOutput .msg-play-btn {
-        color: #0f0;
-        margin-right: 4px;
-      }
-      #aiOutput .msg-copy-btn {
-        color: #0ff;
-        margin-left: 4px;
-      }
+      #aiOutput .msg-play-btn { color: #0f0; margin-right: 4px; }
+      #aiOutput .msg-copy-btn { color: var(--meq-accent); margin-left: 4px; }
       #aiOutput .msg-play-btn:hover,
-      #aiOutput .msg-copy-btn:hover {
-        filter: brightness(1.4);
-      }
+      #aiOutput .msg-copy-btn:hover { filter: brightness(1.4); }
     `;
     document.head.appendChild(style);
 
@@ -1176,6 +1756,7 @@ if (hideOthersCb && hideOthersCb.checked) {
   createSessionPanel();
   createRightInfoPanel();
   loadSessionList("active");
+  initTopTextControls();
 
   window.appendAIMessage = appendFormattedMessage;
 

@@ -3,6 +3,118 @@ const aiOutputEl = document.getElementById("aiOutput");
 const aiInputEl  = document.getElementById("aiInput");
 const aiSendBtn  = document.getElementById("aiSend");
 
+// Accent CSS var for non-canvas UI only (auto-shifts with your theme)
+const ACCENT_VAR = "var(--meq-accent, #0ff)";
+
+// ✅ Canvas needs a real color value (not "var(...)"), so read the picker color:
+function readCssVar(styleObj, name) {
+  try {
+    const v = styleObj.getPropertyValue(name);
+    return v ? v.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+let _canvasAccentCache = "#0ff";
+let _canvasAccentCacheTime = 0;
+
+function getCanvasAccent() {
+  const now = performance.now();
+  if (now - _canvasAccentCacheTime < 250) return _canvasAccentCache;
+
+  try {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bodyStyle = getComputedStyle(document.body);
+
+    const candidates = [
+      "--ui-accent",
+      "--ui-color",
+      "--meq-ui-accent",
+      "--meq-ui-color",
+      "--meq-accent",
+      "--accent-color",
+      "--primary-color",
+      "--theme-accent",
+      "--picker-color",
+      "--picker-accent"
+    ];
+
+    for (const v of candidates) {
+      const a = readCssVar(rootStyle, v) || readCssVar(bodyStyle, v);
+      if (a) {
+        _canvasAccentCache = a;
+        _canvasAccentCacheTime = now;
+        return a;
+      }
+    }
+
+    if (typeof window._meqUIColor === "string" && window._meqUIColor.trim()) {
+      _canvasAccentCache = window._meqUIColor.trim();
+      _canvasAccentCacheTime = now;
+      return _canvasAccentCache;
+    }
+    if (typeof window._meqUIAccent === "string" && window._meqUIAccent.trim()) {
+      _canvasAccentCache = window._meqUIAccent.trim();
+      _canvasAccentCacheTime = now;
+      return _canvasAccentCache;
+    }
+    if (typeof window.uiAccent === "string" && window.uiAccent.trim()) {
+      _canvasAccentCache = window.uiAccent.trim();
+      _canvasAccentCacheTime = now;
+      return _canvasAccentCache;
+    }
+
+    const storageKeys = [
+      "uiAccent",
+      "uiColor",
+      "meqUIColor",
+      "meq-ui-accent",
+      "meq-accent",
+      "accentColor",
+      "themeAccent",
+      "pickerColor",
+      "pickerAccent"
+    ];
+    for (const k of storageKeys) {
+      const val = localStorage.getItem(k);
+      if (val && val.trim()) {
+        _canvasAccentCache = val.trim();
+        _canvasAccentCacheTime = now;
+        return _canvasAccentCache;
+      }
+    }
+
+    // last-resort: sniff border/text from known UI nodes
+    const probes = ["#segmentLog", "#rightPanel", "#layoutBtn", ".action-btn", "#aiInput", "#aiSend"];
+    for (const sel of probes) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      const cs = getComputedStyle(el);
+      const borders = [
+        cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor, cs.borderColor
+      ].filter(Boolean);
+
+      for (const bc of borders) {
+        if (bc && bc !== "transparent" && !/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(bc)) {
+          _canvasAccentCache = bc;
+          _canvasAccentCacheTime = now;
+          return bc;
+        }
+      }
+      if (cs.color && cs.color !== "transparent") {
+        _canvasAccentCache = cs.color;
+        _canvasAccentCacheTime = now;
+        return cs.color;
+      }
+    }
+  } catch {}
+
+  _canvasAccentCache = "#0ff";
+  _canvasAccentCacheTime = now;
+  return _canvasAccentCache;
+}
+
 // --- 30s cooldown state for AI send button ---
 const AI_SEND_COOLDOWN_SECONDS = 30;
 let aiSendCooldown            = false;
@@ -214,9 +326,9 @@ function updateSegmentLog() {
       width: 100%;
       margin-bottom: 6px;
       padding: 6px 4px;
-      border: 1px solid #0ff;
+      border: 1px solid ${ACCENT_VAR};
       background: #111;
-      color: #0ff;
+      color: ${ACCENT_VAR};
       border-radius: 4px;
       cursor: pointer;
       font-size: 11px;
@@ -234,7 +346,7 @@ function updateSegmentLog() {
     muteRow.style.cssText = `
       margin-bottom: 6px;
       font-size: 10px;
-      color: #0ff;
+      color: ${ACCENT_VAR};
       display: flex;
       align-items: center;
       gap: 4px;
@@ -270,6 +382,18 @@ function updateSegmentLog() {
     panel.appendChild(header);
   }
 
+  // Style header every time (so it stays in sync with theme swaps)
+  header.style.cssText = `
+    margin: 4px 0 6px;
+    padding: 4px 0 2px;
+    font-size: 12px;
+    font-weight: bold;
+    color: ${ACCENT_VAR};
+    border-top: 1px solid #222;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  `;
+
   let list = panel.querySelector(".segment-list");
   if (!list) {
     list = document.createElement("div");
@@ -277,8 +401,26 @@ function updateSegmentLog() {
     panel.appendChild(list);
   }
 
+  // Style list container every time
+  list.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+    color: ${ACCENT_VAR};
+  `;
+
   if (segmentHistory.length === 0) {
-    list.innerHTML = `<div class="entry">No segments yet</div>`;
+    list.innerHTML = `
+      <div class="entry" style="
+        padding: 4px 6px;
+        border: 1px solid #222;
+        background: #0b0b0b;
+        color: ${ACCENT_VAR};
+        border-radius: 3px;
+        opacity: 0.7;
+      ">No segments yet</div>
+    `;
     return;
   }
 
@@ -287,11 +429,18 @@ function updateSegmentLog() {
       ? `Gasket ${entry.gasket}`
       : `Gasket ${entry.gasket}^${entry.power}`;
     return `
-      <div class="entry">
+      <div class="entry" style="
+        padding: 4px 6px;
+        border: 1px solid #222;
+        background: #0b0b0b;
+        color: ${ACCENT_VAR};
+        border-radius: 3px;
+      ">
         ${gasketLabel}, Seg ${entry.segment}: ${entry.address}
       </div>
     `;
   }).join("");
+
 }
 
 updateSegmentLog();
@@ -672,7 +821,8 @@ function drawOmniverse(baseX,baseY,rot,scale=1,isSmall=false,isLeft=false,isRigh
 }
 
 function drawTitle() {
-  ctx.fillStyle = "#0ff";
+  // ✅ follow UI picker for title line
+  ctx.fillStyle = getCanvasAccent();
   ctx.font = "24px monospace";
   ctx.textAlign = "center";
 
@@ -791,7 +941,8 @@ function drawPyramidStack() {
   ctx.strokeRect(centerX + controlOffsetX - 50, centerY + controlOffsetY, 100, 20);
   ctx.fillText("TOP LAYER", centerX + controlOffsetX, centerY + controlOffsetY + 10);
 
-  ctx.fillStyle = "cyan";
+  // ✅ keep Layer readout stable green (not picker)
+  ctx.fillStyle = "#0f0";
   ctx.font = "20px monospace";
 
   const currentLayer = (pyramidLayers - activeLayers) + 1;

@@ -411,12 +411,17 @@
       lockDiv.style.marginBottom = "6px";
       lockDiv.style.borderBottom = "1px solid #222";
       lockDiv.style.paddingBottom = "4px";
+      // ✅ make the whole block inherit live accent
+      lockDiv.style.color = "var(--meq-accent)";
 
       if (panel.firstChild) {
         panel.insertBefore(lockDiv, panel.firstChild);
       } else {
         panel.appendChild(lockDiv);
       }
+    } else {
+      // keep color live even if something overwrote it
+      lockDiv.style.color = "var(--meq-accent)";
     }
 
     const rows = BIG_NOFURS.map((name) => {
@@ -425,7 +430,7 @@
     }).join("");
 
     lockDiv.innerHTML = `
-      <h2 style="font-size:12px;margin-bottom:2px;color:#0ff;">Nofur Locks</h2>
+      <h2 style="font-size:12px;margin-bottom:2px;color:var(--meq-accent);">Nofur Locks</h2>
       ${rows}
     `;
   }

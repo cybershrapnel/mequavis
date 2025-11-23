@@ -47,26 +47,18 @@
   // GASKET POWER HELPERS
   // ---------------------------------------------------------------------------
 
-  // Read current gasketPower from the global script.
-  // Your inline script already has:
-  //   let gasket = 1;
-  //   let gasketPower = 1;
   function getGasketPower() {
     if (typeof gasketPower === "number" && isFinite(gasketPower) && gasketPower > 0) {
       return Math.floor(gasketPower);
     }
-    // Fallback if something weird happens
     return 1;
   }
 
-  // Logical room key for the current gasket power.
-  // This is the ONLY thing we send to chat.php as "segment_address".
   function getGasketAddressKey() {
     const gp = getGasketPower();
     return "GASKET_POWER_" + gp;
   }
 
-  // Human-readable header label
   function getGasketHeaderLabel() {
     const gp = getGasketPower();
     return "Gasket Power Chat " + gp;
@@ -86,9 +78,8 @@
   async function ensureRoomMapping() {
     const gasketKey = getGasketAddressKey();
 
-    // If gasket power key unchanged and we already have a room, nothing to do.
     if (gasketKey === lastGasketKey && currentRoomId) {
-      updateGasketRoomHeader(); // keep header synced
+      updateGasketRoomHeader();
       return;
     }
 
@@ -103,7 +94,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "map_segment",
-          segment_address: gasketKey    // <-- ONLY this key now
+          segment_address: gasketKey
         })
       });
 
@@ -176,7 +167,6 @@
   async function sendRoomMessage() {
     if (!messageInputEl) return;
 
-    // Respect cooldown regardless of click vs Enter
     if (sendCooldownActive) {
       return;
     }
@@ -188,10 +178,8 @@
     const text    = textRaw.trim();
     if (!text) return;
 
-    // Start cooldown as soon as user actually sends something
     startSendCooldown();
 
-    // Make sure we’re mapped to the correct current gasket power room
     await ensureRoomMapping();
 
     if (!currentRoomId) {
@@ -199,18 +187,14 @@
       return;
     }
 
-    // Echo locally to main chat
     appendToMainChat(username, text);
 
-    // Clear textbox
     messageInputEl.value = "";
 
-    // Persist username
     try {
       window.localStorage.setItem("meqGasketChatUsername", username);
     } catch (_e) {}
 
-    // Send to server
     try {
       const res = await fetch(ROOM_API_URL, {
         method: "POST",
@@ -245,7 +229,6 @@
   // MANUAL HISTORY LOAD
   // ---------------------------------------------------------------------------
   async function loadHistoryForCurrentRoom() {
-    // Ensure mapped to correct gasket power
     await ensureRoomMapping();
 
     if (!currentRoomId) {
@@ -253,7 +236,6 @@
       return;
     }
 
-    // How many messages back?
     let count = 50;
     if (historyCountInputEl) {
       const raw = historyCountInputEl.value;
@@ -264,14 +246,13 @@
     }
 
     try {
-      // First: get total count cheaply by asking from a huge index
       const probeRes = await fetch(ROOM_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action:     "poll_messages",
           room_id:    currentRoomId,
-          from_index: 999999999   // PHP clamps to total
+          from_index: 999999999
         })
       });
 
@@ -328,7 +309,6 @@
         appendToMainChat(u, t);
       });
 
-      // Keep polling aligned to end of log
       if (typeof histData.next_index === "number") {
         if (histData.next_index > lastPollIndex) {
           lastPollIndex = histData.next_index;
@@ -348,7 +328,6 @@
   async function pollRoomMessages() {
     pollTimerId = null;
 
-    // Re-check which gasket power we’re in each poll
     await ensureRoomMapping();
 
     if (!currentRoomId) {
@@ -397,7 +376,7 @@
   }
 
   function scheduleNextPoll() {
-    pollTimerId = setTimeout(pollRoomMessages, 30000); // ~30 seconds
+    pollTimerId = setTimeout(pollRoomMessages, 30000);
   }
 
   // ---------------------------------------------------------------------------
@@ -407,6 +386,34 @@
     const chatInfoContent =
       chatInfoPanel.querySelector("#chatInfoContent") || chatInfoPanel;
 
+    // Accent-following CSS for gasket UI + ad border candidates
+    let accentStyle = document.getElementById("meqGasketAccentStyle");
+    if (!accentStyle) {
+      accentStyle = document.createElement("style");
+      accentStyle.id = "meqGasketAccentStyle";
+      accentStyle.textContent = `
+        #gasketRoomChatBlock input,
+        #gasketRoomChatBlock textarea {
+          border-color: var(--meq-accent) !important;
+          color: var(--meq-accent) !important;
+        }
+        #gasketRoomChatBlock button {
+          border-color: var(--meq-accent) !important;
+          color: var(--meq-accent) !important;
+        }
+        #gasketRoomHeader {
+          color: var(--meq-accent) !important;
+        }
+
+        /* Ad area border follow accent (covers common ids/classes you use) */
+        #meqAdArea, #meqAdPanel, #adArea, #adPanel,
+        .meq-ad, .meq-ads, .meq-ad-wrap, .ad-area {
+          border-color: var(--meq-accent) !important;
+        }
+      `;
+      document.head.appendChild(accentStyle);
+    }
+
     const block = document.createElement("div");
     block.id = "gasketRoomChatBlock";
     block.style.marginTop = "8px";
@@ -415,12 +422,13 @@
     block.style.fontSize = "10px";
 
     block.innerHTML = ''
-      // NEW: history row ABOVE the header
       + '<div id="gasketHistoryRow"'
       + '     style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'
       + '  <button id="gasketHistoryBtn"'
       + '          style="flex:0 0 auto;padding:2px 6px;font-size:10px;'
-      + '                 background:#111;border:1px solid #0ff;color:#0ff;'
+      + '                 background:#111;'
+      + '                 border:1px solid var(--meq-accent);'
+      + '                 color:var(--meq-accent);'
       + '                 border-radius:3px;cursor:pointer;">'
       + '    Load History'
       + '  </button>'
@@ -428,30 +436,39 @@
       + '    Last'
       + '    <input type="number" id="gasketHistoryCount" value="50" min="1"'
       + '           style="width:60px;margin:0 4px;background:#050505;'
-      + '                  border:1px solid #0ff;color:#0ff;border-radius:3px;'
+      + '                  border:1px solid var(--meq-accent);'
+      + '                  color:var(--meq-accent);'
+      + '                  border-radius:3px;'
       + '                  padding:1px 3px;font-size:10px;">'
       + '    msgs'
       + '  </label>'
       + '</div>'
       + '<h3 id="gasketRoomHeader"'
-      + '    style="margin:0 0 4px 0;font-size:11px;color:#0ff;">'
+      + '    style="margin:0 0 4px 0;font-size:11px;'
+      + '           color:var(--meq-accent);">'
       + '  Gasket Power Chat 1'
       + '</h3>'
       + '<label style="font-size:10px;display:block;margin-top:4px;">'
       + '  Username:'
       + '  <input type="text" id="gasketRoomUsername"'
       + '         style="width:100%;box-sizing:border-box;font-size:10px;'
-      + '                background:#050505;border:1px solid #0ff;color:#0ff;'
+      + '                background:#050505;'
+      + '                border:1px solid var(--meq-accent);'
+      + '                color:var(--meq-accent);'
       + '                border-radius:3px;padding:2px 4px;">'
       + '</label>'
       + '<textarea id="gasketRoomInput"'
       + '          style="width:100%;height:60px;box-sizing:border-box;margin-top:4px;'
-      + '                 background:#050505;border:1px solid #0ff;color:#0ff;'
+      + '                 background:#050505;'
+      + '                 border:1px solid var(--meq-accent);'
+      + '                 color:var(--meq-accent);'
       + '                 font-family:monospace;font-size:10px;border-radius:3px;'
       + '                 padding:2px 4px;"></textarea>'
       + '<button id="gasketRoomSendBtn"'
       + '        style="margin-top:4px;width:100%;padding:4px;font-size:10px;'
-      + '               background:#111;border:1px solid #0ff;color:#0ff;'
+      + '               background:#111;'
+      + '               border:1px solid var(--meq-accent);'
+      + '               color:var(--meq-accent);'
       + '               border-radius:3px;cursor:pointer;">'
       + '  ' + SEND_BTN_DEFAULT_LABEL +
       '</button>';
@@ -465,7 +482,6 @@
     historyBtnEl        = block.querySelector("#gasketHistoryBtn");
     historyCountInputEl = block.querySelector("#gasketHistoryCount");
 
-    // Restore saved username if present
     try {
       const stored = window.localStorage.getItem("meqGasketChatUsername");
       if (stored && usernameInputEl) {
@@ -509,14 +525,12 @@
 
     createGasketRoomUI(panel);
 
-    // Initial mapping + start polling
     ensureRoomMapping().then(function () {
       if (!pollTimerId) {
         scheduleNextPoll();
       }
     });
 
-    // Heartbeat: if gasketPower changes in the main script, remap room + update header.
     let lastLabel = getGasketHeaderLabel();
     setInterval(() => {
       const lbl = getGasketHeaderLabel();
@@ -535,7 +549,6 @@
     initWhenReady();
   }
 
-  // Debug handle if you want it in console
   window.MeqSegmentChat = {
     getCurrentRoomId: function () { return currentRoomId; },
     getGasketPower:   getGasketPower,

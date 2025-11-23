@@ -22,7 +22,7 @@
   let baseFreq = 440;      // Hz
   let rangeOctaves = 2;    // octaves
   let toneDuration = 0.2;  // seconds
-  let volume = 0.05;        // 0..1
+  let volume = 0.05;       // 0..1
   let beatBpm = 120;       // BPM for swatch #5 beat
 
   // Beat timer
@@ -33,6 +33,9 @@
 
   // Tone panel node
   let tonePanelEl = null;
+
+  // Accent CSS var (auto-shifts with your theme)
+  const ACCENT_VAR = "var(--meq-accent, #0ff)";
 
   // ---------------------------------------------------------------------------
   // AUDIO HELPERS
@@ -234,10 +237,10 @@
     tonePanelEl.style.borderTop = "1px solid #222";
     tonePanelEl.style.paddingTop = "6px";
     tonePanelEl.style.fontSize = "11px";
-    tonePanelEl.style.color = "#0ff";
+    tonePanelEl.style.color = ACCENT_VAR;
 
     tonePanelEl.innerHTML = `
-      <h3 style="font-size:11px;color:#0ff;margin:4px 0 4px;">Seeker Tone Engine</h3>
+      <h3 style="font-size:11px;color:${ACCENT_VAR};margin:4px 0 4px;">Seeker Tone Engine</h3>
 
       <div style="margin-bottom:4px;">
         <label>Base Frequency:
@@ -271,7 +274,6 @@
                style="width:100%;">
       </div>
 
-
       <div style="margin-bottom:6px;">
         <label>Beat Tempo:
           <span id="toneTempoValue">${beatBpm.toFixed(0)} BPM</span>
@@ -284,8 +286,8 @@
         width:100%;
         padding:4px;
         background:#111;
-        color:#0ff;
-        border:1px solid #0ff;
+        color:${ACCENT_VAR};
+        border:1px solid ${ACCENT_VAR};
         border-radius:3px;
         cursor:pointer;
         font-size:11px;
@@ -293,7 +295,6 @@
       ">Enable Tones</button>
     `;
 
-    // Insert BEFORE the Segments header if present, else at top
     const segmentsHeader =
       panel.querySelector("h2.segment-header") ||
       Array.from(panel.querySelectorAll("h2, h3")).find(h =>
@@ -347,7 +348,7 @@
       volSlider.addEventListener("input", () => {
         let v = parseFloat(volSlider.value);
         if (isNaN(v)) {
-          v = 0.05; // fallback to 5% if something goes weird
+          v = 0.05;
         }
         volume = v;
         volLabel.textContent = `${(volume * 100).toFixed(0)}%`;
@@ -356,7 +357,6 @@
         }
       });
     }
-
 
     if (tempoSlider && tempoLabel) {
       tempoSlider.addEventListener("input", () => {
@@ -402,7 +402,6 @@
     buildTonePanel();
     lastColors = getCurrentSwatchColors();
 
-    // Poll only the swatches, panel is static now
     setInterval(handleSwatchChanges, 200);
 
     console.log("[meq-tone-engine] Seeker Tone Engine initialized.");

@@ -77,16 +77,56 @@
   };
 
   // ---------------------------------------------------------------------------
+  // COLOR SHIFT / THEME SYNC (USES CSS VARS)
+  // ---------------------------------------------------------------------------
+  let MEQ_ACCENT  = "#00ffff";
+  let MEQ_SUCCESS = "#00ff00";
+  let MEQ_DANGER  = "#ff3344";
+  let MEQ_IRIS    = null;
+  let _lastThemeSig = "";
+
+  function readCssVar(name, fallback) {
+    try {
+      const v = getComputedStyle(document.documentElement)
+        .getPropertyValue(name)
+        .trim();
+      return v || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function syncTheme() {
+    const accent  = readCssVar("--meq-accent", MEQ_ACCENT).toLowerCase();
+    const success = readCssVar("--meq-success", MEQ_SUCCESS).toLowerCase();
+    const danger  = readCssVar("--meq-danger", MEQ_DANGER).toLowerCase();
+    const iris    = readCssVar("--meq-eye-iris", "").trim().toLowerCase() || null;
+
+    const sig = `${accent}|${success}|${danger}|${iris}`;
+    if (sig === _lastThemeSig) return;
+    _lastThemeSig = sig;
+
+    MEQ_ACCENT  = accent || MEQ_ACCENT;
+    MEQ_SUCCESS = success || MEQ_SUCCESS;
+    MEQ_DANGER  = danger || MEQ_DANGER;
+    MEQ_IRIS    = iris; // null means "follow accent"
+  }
+
+  function accent() { return MEQ_ACCENT || "#00ffff"; }
+  function successCol() { return MEQ_SUCCESS || accent(); }
+  function dangerCol() { return MEQ_DANGER || accent(); }
+  function irisCol() { return MEQ_IRIS || accent(); }
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
   // ANTI/INVERT MODE DETECTION + COLOR INVERSION (DISPLAY ONLY)
   // ---------------------------------------------------------------------------
 
   function isAntiModeActive() {
-    // Prefer explicit flags if you set one elsewhere
     if (window._meqFractalAntiMode) return true;
     if (window._meqAntiZoneMode) return true;
     if (window._meqFractalInvertMode) return true;
 
-    // Fallback: detect CSS filter on the canvas
     try {
       const c = (typeof canvas !== "undefined" && canvas)
         ? canvas
@@ -103,7 +143,6 @@
     try {
       if (!c || c === "transparent") return c;
 
-      // rgb(...) support
       if (c.startsWith("rgb")) {
         const nums = c
           .replace(/[^\d,]/g, "")
@@ -115,7 +154,6 @@
         return `rgb(${255 - r},${255 - g},${255 - b})`;
       }
 
-      // #rrggbb support
       if (c[0] === "#" && c.length === 7) {
         const hex = parseInt(c.slice(1), 16);
         const r = (hex >> 16) & 255;
@@ -137,27 +175,22 @@
   // OMNIVERSE LABEL HELPERS (DISPLAY ONLY)
   // ---------------------------------------------------------------------------
 
-  // Turn something like "L2-O..27" into "Layer 2 – Omniverse 027"
   function formatOmniLabel(raw) {
     if (!raw) return raw;
     let out = String(raw);
 
-    // L → Layer
     out = out.replace(/\bL(\d+)/g, "Layer $1");
 
-    // O.. → Omniverse <current omniverseNumber>
     const omni = (typeof window.omniverseNumber === "string" &&
                   window.omniverseNumber.length)
       ? window.omniverseNumber
       : "..";
 
-    // Handles "O.." variants
     out = out.replace(/O\.\./g, "Omniverse " + omni);
 
     return out;
   }
 
-  // Prepend Gasket + Segment on their own line above the label
   function prependGasketSegment(label) {
     if (!label) return label;
 
@@ -182,7 +215,6 @@
 
     const segLabel = seg != null ? `Segment ${seg}` : "Segment ?";
 
-    // Line break before the Layer/Omniverse part
     return `${gasketLabel}, ${segLabel}<br>${label}`;
   }
 
@@ -190,22 +222,17 @@
 
   let eyeball = null;
 
-  // Mouse-follow target (canvas coords)
   let mouseTarget = { x: null, y: null };
   let mouseListenerAttached = false;
 
-  // Auto-traverse: last small nofur we triggered on (by flag+baseDigit)
   let lastTraverseNodeKey = null;
 
-  // Snapshot of traversal display text (frozen at moment of click)
   let traversalDisplaySnapshot = null;
 
-  // Disabled-eye random traversal state
   let disabledTraverseTarget = null;
   let disabledTraverseLastSwitchTime = 0;
-  let disabledTraverseInterval = 0; // ms between picks (20–200, scaled)
+  let disabledTraverseInterval = 0;
 
-  // Sticky label for Traversal Link when OMEGA is unlocked (raw label, like "L2-O..2")
   let traversalStickyLabel = null;
 
   function attachMouseListener() {
@@ -251,16 +278,15 @@
     }
   }
 
-  // Random wander
   function updateEyeballRandom() {
     if (!eyeball) return;
     if (typeof W === "undefined" || typeof H === "undefined") return;
 
-    const sliderVal = getSpeedScale();  // 0..100
-    const norm = sliderVal / 10;        // 0..10
-       const speed = eyeball.baseSpeed * norm; // 0.. ~25 px/frame
+    const sliderVal = getSpeedScale();
+    const norm = sliderVal / 10;
+    const speed = eyeball.baseSpeed * norm;
 
-    if (speed <= 0) return; // frozen
+    if (speed <= 0) return;
 
     const maxTurn = 0.08;
     const turn = (Math.random() - 0.5) * 2 * maxTurn;
@@ -285,16 +311,15 @@
     }
   }
 
-  // Follow mouse
   function updateEyeballFollowMouse() {
     if (!eyeball) return;
     if (typeof W === "undefined" || typeof H === "undefined") return;
 
-    const sliderVal = getSpeedScale();  // 0..100
-    const norm = sliderVal / 10;        // 0..10
-    const maxStep = norm * 5;           // 0..50 px/frame
+    const sliderVal = getSpeedScale();
+    const norm = sliderVal / 10;
+    const maxStep = norm * 5;
 
-    if (maxStep <= 0) return; // stopped
+    if (maxStep <= 0) return;
 
     if (mouseTarget.x == null || mouseTarget.y == null) {
       updateEyeballRandom();
@@ -324,7 +349,7 @@
 
   function blendColors(c1, c2) {
     try {
-      if (!c1 && !c2) return "#0ff";
+      if (!c1 && !c2) return accent();
       if (!c1) return c2;
       if (!c2) return c1;
 
@@ -351,7 +376,7 @@
       const bl = Math.floor((a.b + b.b) / 2);
       return `rgb(${r},${g},${bl})`;
     } catch {
-      return "#0ff";
+      return accent();
     }
   }
 
@@ -423,11 +448,14 @@
       console.warn("[meq-eyeball] getBridgeColor error:", err);
     }
 
-    return "#0ff";
+    return accent();
   }
 
   function drawEyeballAt(x, y) {
     if (!eyeball || typeof ctx === "undefined") return;
+
+    const acc = accent();
+    const iris = irisCol();
 
     ctx.save();
 
@@ -436,12 +464,12 @@
     ctx.fillStyle = "#ffffff";
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "#0ff";
+    ctx.strokeStyle = acc;
     ctx.stroke();
 
     ctx.beginPath();
     ctx.arc(x, y, eyeball.radius * 0.45, 0, Math.PI * 2);
-    ctx.fillStyle = "#00aaff";
+    ctx.fillStyle = iris;
     ctx.fill();
 
     ctx.beginPath();
@@ -452,7 +480,6 @@
     ctx.restore();
   }
 
-  // Parked/disabled eye anchor position
   function getDisabledEyeballAnchor() {
     try {
       if (typeof center !== "undefined" && center) {
@@ -615,18 +642,9 @@
     }
   }
 
-  // Auto traverse: always driven from Traversal Link (Link 4).
-  // We:
-  //  1) Build traversal text from the *current* (pre-click) globals
-  //  2) Snapshot that text
-  //  3) Click the small nofur
-  //  4) Never change the snapshot again until a new small nofur is targeted
   function maybeAutoTraverse(targetNode, rawTraversalLabel) {
     if (!window._meqEyeAutoTraverse) return;
 
-    // If the current traversal target isn't a small side wheel,
-    // DO NOT clear the snapshot — keep the last text until a real
-    // small wheel is hit again.
     if (
       !targetNode ||
       !targetNode.center ||
@@ -638,33 +656,27 @@
 
     const key = `${targetNode.flag}:${targetNode.baseDigit}`;
 
-    // Same small nofur as last time → no new click, keep old snapshot text.
     if (key === lastTraverseNodeKey) {
       return;
     }
 
-    // --- NEW TARGET: snapshot the *pre-click* text first ---
-
-    // Prefer the raw traversal label; fall back to node.label if needed
     let labelToUse = rawTraversalLabel;
     if (!labelToUse && typeof targetNode.label === "string") {
       labelToUse = targetNode.label;
     }
 
     if (labelToUse) {
-      let t = formatOmniLabel(labelToUse); // L → Layer, O.. → Omniverse N
-      t = prependGasketSegment(t);        // Gasket / Segment line
+      let t = formatOmniLabel(labelToUse);
+      t = prependGasketSegment(t);
       traversalDisplaySnapshot = t;
     } else {
       traversalDisplaySnapshot = "-";
     }
 
-    // --- Now fire the click, which mutates segment/gasket/omniverse ---
     simulateCanvasClickAt(targetNode.center.x, targetNode.center.y);
     lastTraverseNodeKey = key;
   }
 
-  // Disabled-eye random small-wheel traversal (visual + click)
   function updateDisabledAutoTraverse(timestamp) {
     if (!window._meqEyeAutoTraverse || window._meqEyeEnabled) {
       disabledTraverseTarget = null;
@@ -693,19 +705,18 @@
     }
 
     function computeInterval() {
-      const speedValRaw = getSpeedScale();   // 0..100
+      const speedValRaw = getSpeedScale();
       const speedVal = speedValRaw <= 0 ? 0.25 : speedValRaw;
 
-      const baselineMin = 20;   // ms
-      const baselineMax = 200;  // ms
+      const baselineMin = 20;
+      const baselineMax = 200;
       const base = baselineMin + Math.random() * (baselineMax - baselineMin);
 
-      const multiplier = 10 / speedVal; // lower slider → slower picks, higher → faster
+      const multiplier = 10 / speedVal;
 
       return base * multiplier;
     }
 
-    // Initialize on first run
     if (!disabledTraverseTarget) {
       const idx = Math.floor(Math.random() * smalls.length);
       disabledTraverseTarget = smalls[idx];
@@ -725,7 +736,7 @@
     if (elapsed >= disabledTraverseInterval) {
       const idx = Math.floor(Math.random() * smalls.length);
       disabledTraverseTarget = smalls[idx];
-      disabledTraverseInterval = computeInterval(); // next scaled interval
+      disabledTraverseInterval = computeInterval();
       disabledTraverseLastSwitchTime = timestamp;
     }
   }
@@ -735,7 +746,8 @@
       if (typeof ctx === "undefined") return;
       if (!eyeball) return;
 
-      // Disabled eye but Auto Traverse ON → park and draw to random small nofur
+      const acc = accent();
+
       if (!window._meqEyeEnabled) {
         const anchor = getDisabledEyeballAnchor();
 
@@ -753,7 +765,7 @@
 
           ctx.save();
           ctx.strokeStyle =
-            disabledTraverseTarget.color || "#0f0";
+            disabledTraverseTarget.color || acc;
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -763,13 +775,11 @@
 
           traversalLabel = disabledTraverseTarget.label || null;
 
-          // Use the same pre-click snapshot logic for disabled mode
           maybeAutoTraverse(disabledTraverseTarget, traversalLabel);
         }
 
         drawEyeballAt(anchor.x, anchor.y);
 
-        // Even when disabled, expose traversalLabel so the UI can show Traversal Link
         window._meqEyeballStatus = {
           primaryLabel: null,
           primaryColor: null,
@@ -783,8 +793,6 @@
         };
         return;
       }
-
-      // === Eye enabled path ===
 
       let nodes = [];
       if (Array.isArray(window.nofurs)) {
@@ -828,15 +836,12 @@
       let thirdColor = null;
       let thirdTarget = null;
 
-      // Traversal Link (4th)
       let traversalTarget = null;
       let traversalLabel = null;
 
-      let targetNode = null; // Eye Link 1 nearest node
+      let targetNode = null;
 
-      // A: OMEGA locked → tri-line + traversal
       if (omegaLock.locked && omegaCenter) {
-        // Eye Link 1 → OMEGA
         targetNode = omegaCenter;
         primaryLabel = "OMEGA";
 
@@ -847,7 +852,6 @@
           primaryColor = getBridgeColor("OMEGA");
         }
 
-        // Second line: nearest locked big among ALPHA/BETA/GAMMA/DELTA
         const candidates = ["ALPHA", "BETA", "GAMMA", "DELTA"];
         let bestDist = Infinity;
         let bestNode = null;
@@ -883,7 +887,6 @@
           secondaryColor = getBridgeColor(bestLabel);
         }
 
-        // Third line: nearest small circle in any big nofur
         const smallNodes = computeBigSmallNodes();
         let bestSmall = null;
         let bestSmallDist = Infinity;
@@ -906,7 +909,6 @@
           thirdParentLabel = bestSmall.parentLabel || null;
         }
 
-        // Traversal Link (4): nearest SMALL nofur wheel (left/right)
         let bestSmallWheel = null;
         let bestSmallWheelDist = Infinity;
 
@@ -928,7 +930,6 @@
           traversalLabel = bestSmallWheel.label || null;
         }
       } else {
-        // B: Normal behavior (OMEGA unlocked)
         let closest = null;
         let bestDist = Infinity;
 
@@ -956,12 +957,9 @@
         ) {
           primaryColor = getBridgeColor(targetNode.label);
         } else {
-          primaryColor = "#0ff";
+          primaryColor = acc;
         }
 
-        // Traversal Link (4) in normal mode:
-        //   - target = Eye Link 1 target ONLY if it is a small nofur wheel.
-        //   - label is sticky across frames.
         if (
           targetNode &&
           (targetNode.flag === "left" || targetNode.flag === "right") &&
@@ -973,15 +971,11 @@
 
         traversalLabel = traversalStickyLabel;
 
-        // break the small-wheel streak when we're not on a small nofur
         if (!traversalTarget) {
           lastTraverseNodeKey = null;
         }
       }
 
-      // === Draw lines ===
-
-      // Eye Link 1
       if (targetNode && targetNode.center) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -1002,7 +996,6 @@
         }
       }
 
-      // Eye Link 2
       if (secondaryTarget && secondaryTarget.center && secondaryColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -1019,7 +1012,6 @@
         ctx.restore();
       }
 
-      // Eye Link 3
       if (thirdTarget && thirdTarget.center && thirdColor) {
         const x1 = eyeball.x;
         const y1 = eyeball.y;
@@ -1036,7 +1028,6 @@
         ctx.restore();
       }
 
-      // Traversal Link (4)
       if (
         window._meqEyeAutoTraverse &&
         traversalTarget &&
@@ -1050,7 +1041,7 @@
         ctx.save();
         ctx.strokeStyle =
           traversalTarget.color ||
-          (thirdColor || primaryColor || "#0f0");
+          (thirdColor || primaryColor || acc);
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
@@ -1061,7 +1052,6 @@
         ctx.restore();
       }
 
-      // Auto traverse click (with pre-click text snapshot)
       maybeAutoTraverse(traversalTarget, traversalLabel);
 
       drawEyeballOnly();
@@ -1087,6 +1077,7 @@
     const panel = document.getElementById("segmentLog");
     if (!panel) return;
 
+    const acc = accent();
     const enabled   = !!window._meqEyeEnabled;
     const follow    = !!window._meqEyeFollowMouse;
     const autoTrav  = !!window._meqEyeAutoTraverse;
@@ -1138,8 +1129,8 @@
       toggleBtn.style.padding = "3px 6px";
       toggleBtn.style.fontSize = "10px";
       toggleBtn.style.background = "#111";
-      toggleBtn.style.color = "#0ff";
-      toggleBtn.style.border = "1px solid #0ff";
+      toggleBtn.style.color = acc;
+      toggleBtn.style.border = `1px solid ${acc}`;
       toggleBtn.style.borderRadius = "3px";
       toggleBtn.style.cursor = "pointer";
       toggleBtn.addEventListener("click", function () {
@@ -1147,6 +1138,8 @@
       });
       btnRow.appendChild(toggleBtn);
     }
+    toggleBtn.style.color = acc;
+    toggleBtn.style.borderColor = acc;
     toggleBtn.textContent = enabled ? "Disable Seeker Eye" : "Enable Seeker Eye";
 
     let followBtn = document.getElementById("followEyeBtn");
@@ -1157,8 +1150,8 @@
       followBtn.style.padding = "3px 6px";
       followBtn.style.fontSize = "10px";
       followBtn.style.background = "#111";
-      followBtn.style.color = "#0ff";
-      followBtn.style.border = "1px solid #0ff";
+      followBtn.style.color = acc;
+      followBtn.style.border = `1px solid ${acc}`;
       followBtn.style.borderRadius = "3px";
       followBtn.style.cursor = "pointer";
       followBtn.addEventListener("click", function () {
@@ -1166,6 +1159,8 @@
       });
       btnRow.appendChild(followBtn);
     }
+    followBtn.style.color = acc;
+    followBtn.style.borderColor = acc;
     followBtn.textContent = follow ? "Stop Following" : "Follow Mouse";
 
     let speedRow = document.getElementById("eyeSpeedRow");
@@ -1175,7 +1170,7 @@
       speedRow.style.marginTop = "4px";
       speedRow.style.marginBottom = "4px";
       speedRow.style.fontSize = "10px";
-      speedRow.style.color = "#0ff";
+      speedRow.style.color = acc;
 
       const label = document.createElement("span");
       label.textContent = "Eye Speed: ";
@@ -1206,13 +1201,13 @@
 
       container.appendChild(speedRow);
     } else {
+      speedRow.style.color = acc;
       const valSpan = document.getElementById("eyeSpeedValue");
       if (valSpan) {
         valSpan.textContent = speedScale.toFixed(1);
       }
     }
 
-    // Auto Eye Traverse + Big Wheel Spin row
     let autoRow = document.getElementById("autoEyeRow");
     if (!autoRow) {
       autoRow = document.createElement("div");
@@ -1227,8 +1222,8 @@
       autoBtn.style.padding = "3px 6px";
       autoBtn.style.fontSize = "10px";
       autoBtn.style.background = "#111";
-      autoBtn.style.color = "#0ff";
-      autoBtn.style.border = "1px solid #0ff";
+      autoBtn.style.color = acc;
+      autoBtn.style.border = `1px solid ${acc}`;
       autoBtn.style.borderRadius = "3px";
       autoBtn.style.cursor = "pointer";
       autoBtn.addEventListener("click", function () {
@@ -1243,8 +1238,8 @@
       bigSpinBtn.style.padding = "3px 6px";
       bigSpinBtn.style.fontSize = "10px";
       bigSpinBtn.style.background = "#111";
-      bigSpinBtn.style.color = "#0f0";
-      bigSpinBtn.style.border = "1px solid #0f0";
+      bigSpinBtn.style.color = successCol();
+      bigSpinBtn.style.border = `1px solid ${successCol()}`;
       bigSpinBtn.style.borderRadius = "3px";
       bigSpinBtn.style.cursor = "pointer";
       bigSpinBtn.addEventListener("click", function () {
@@ -1258,14 +1253,16 @@
 
     const autoBtn = document.getElementById("autoEyeBtn");
     if (autoBtn) {
+      autoBtn.style.color = acc;
+      autoBtn.style.borderColor = acc;
       autoBtn.textContent = autoTrav ? "Stop Auto Traverse" : "Auto Eye Traverse";
     }
 
     const bigSpinBtn = document.getElementById("bigWheelSpinBtn");
     if (bigSpinBtn) {
       bigSpinBtn.textContent = bigSpin ? "Stop Nofur Spin" : "Start Nofur Spin";
-      bigSpinBtn.style.color = bigSpin ? "#f00" : "#0f0";
-      bigSpinBtn.style.borderColor = bigSpin ? "#f00" : "#0f0";
+      bigSpinBtn.style.color = bigSpin ? dangerCol() : successCol();
+      bigSpinBtn.style.borderColor = bigSpin ? dangerCol() : successCol();
     }
 
     function currentOuterIndexFor(label) {
@@ -1315,7 +1312,7 @@
     }
 
     function buildBridgeNodesHtml() {
-      let html = `<div style="font-size:10px;color:#0ff;margin-top:4px;">Bridge Nodes:<br>`;
+      let html = `<div style="font-size:10px;color:${acc};margin-top:4px;">Bridge Nodes:<br>`;
       const lockState = window.nofurLockState || {};
       const bigList = ["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"];
 
@@ -1362,9 +1359,8 @@
       return html;
     }
 
-    let html = `<h3 style="font-size:11px;color:#0ff;margin:4px 0 2px;">Seeker Links</h3>`;
+    let html = `<h3 style="font-size:11px;color:${acc};margin:4px 0 2px;">Seeker Links</h3>`;
 
-    // Show a note if disabled, but DO NOT bail out – we still want Traversal Link text.
     if (!enabled) {
       html += `<div style="font-size:10px;color:#888;">
         Seeker eye is currently <span style="color:#f33;">DISABLED</span> (Auto Traverse ${
@@ -1373,7 +1369,6 @@
       </div>`;
     }
 
-    // If we have no status at all, fall back to bridge node info only.
     if (!status) {
       html += buildBridgeNodesHtml();
       html += `<br>`;
@@ -1390,7 +1385,7 @@
       thirdParentLabel,
       thirdNodeNum,
       thirdColor,
-      traversalLabel // raw short label of link 4
+      traversalLabel
     } = status;
 
     const lockState = window.nofurLockState || {};
@@ -1407,7 +1402,7 @@
 
     const displayTraversalLabel = traversalDisplaySnapshot || "-";
 
-    html += `<div style="font-size:10px;color:#0ff;">`;
+    html += `<div style="font-size:10px;color:${acc};">`;
     html += `Eye Link 1 → ${displayPrimaryLabel}`;
     html += `<br>Eye Link 2 → ${secondaryLabel || "-"}`;
     html += `<br>Eye Link 3 → ${
@@ -1418,7 +1413,6 @@
     }
     html += `</div>`;
 
-    // --- COLOR SWATCHES: first 4 always populated ---
     const baseCols = new Array(6).fill(null);
 
     let omegaHybrids = getOmegaHybridColors();
@@ -1436,7 +1430,7 @@
     } else if (primaryColor) {
       for (let i = 0; i < 4; i++) baseCols[i] = primaryColor;
     } else {
-      for (let i = 0; i < 4; i++) baseCols[i] = "#0ff";
+      for (let i = 0; i < 4; i++) baseCols[i] = acc;
     }
 
     if (secondaryColor) baseCols[4] = secondaryColor;
@@ -1456,7 +1450,7 @@
 
       if (bridgeCols.length) {
         baseCols[4] = bridgeCols.reduce(
-          (acc, c) => (acc ? blendColors(acc, c) : c),
+          (acc2, c) => (acc2 ? blendColors(acc2, c) : c),
           null
         );
       }
@@ -1471,10 +1465,9 @@
     const valid = baseCols.filter(Boolean);
     let mixColor = null;
     if (valid.length) {
-      mixColor = valid.reduce((acc, c) => (acc ? blendColors(acc, c) : c), null);
+      mixColor = valid.reduce((acc2, c) => (acc2 ? blendColors(acc2, c) : c), null);
     }
 
-    // ✅ DISPLAY inversion for swatches when Anti/Invert is active
     const antiMode = isAntiModeActive();
     const dispCols = baseCols.map((c) =>
       antiMode && c ? invertColorDisplay(c) : c
@@ -1485,7 +1478,7 @@
     html += `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center;">`;
     dispCols.forEach((c, idx) => {
       const bg = c || "transparent";
-      const border = c ? "#0ff" : "#333";
+      const border = c ? acc : "#333";
       html += `<div title="${c || ""}" style="
         width:18px;
         height:18px;
@@ -1495,9 +1488,9 @@
       "></div>`;
 
       if (idx === 5) {
-        html += `<div style="font-size:12px;color:#0ff;padding:0 2px;">=</div>`;
+        html += `<div style="font-size:12px;color:${acc};padding:0 2px;">=</div>`;
         const mixBg = dispMixColor || "transparent";
-        const mixBorder = dispMixColor ? "#0ff" : "#333";
+        const mixBorder = dispMixColor ? acc : "#333";
         html += `<div title="${dispMixColor || ""}" style="
           width:18px;
           height:18px;
@@ -1515,6 +1508,9 @@
   }
 
   function eyeballStep(timestamp) {
+    // ✅ keep theme live each frame
+    syncTheme();
+
     ensureEyeballInit();
     attachMouseListener();
     if (!eyeball) return;
@@ -1543,6 +1539,6 @@
   };
 
   console.log(
-    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal + omniverse-aware labels + gasket/segment prefix + pre-click traversal snapshot + OMEGA+L4 short label + disabled-mode Traversal Link display + always-on 4-swatch palette + composite non-OMEGA bridge swatch 5 + swatch inversion in Anti mode)."
+    "[meq-eyeball] Eyeball wanderer initialized (tri-line + Traversal Link + 7-swatch UI + bridge-node summary + parked-eye-on-disable + Follow Mouse + 0–100 speed + auto-traverse via Link 4 + big wheel spin toggle + disabled-eye random small-wheel traversal + omniverse-aware labels + gasket/segment prefix + pre-click traversal snapshot + OMEGA+L4 short label + disabled-mode Traversal Link display + always-on 4-swatch palette + composite non-OMEGA bridge swatch 5 + swatch inversion in Anti mode + ACCENT COLOR SHIFT SYNC)."
   );
 })();

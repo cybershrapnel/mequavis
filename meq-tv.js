@@ -1,20 +1,6 @@
 // meq-tv.js
 // WATCH AI CABLE TV panel with YouTube playlist support + Music Videos mode.
-// - Uses global window.MEQ_TV_VIDEO_IDS from meq-tv-videos.js
-// - Random starting video
-// - Plays next video when current ends
-// - Destroys player/iframe on close and recreates on open
-// - Music Videos mode pulls videos.txt (tab-separated: title, mp3, mp4, author)
-//   * Random order, random start, no repeats until reshuffle
-//   * Autoplays audio+video when allowed
-//   * Auto-advances to next random entry when AUDIO finishes
-//   * Audio controls styled to match your dark player
-// - MODE TOGGLE:
-//   * Clicking "Music Videos" enters music mode AND button label changes to "Videos".
-//   * While label says "Videos", clicking it exits music mode and restores normal YouTube playback.
-//   * "View Videos":
-//       - In MV mode: overlays a scrollable MV playlist you can click to jump.
-//       - Otherwise: loads external iframe (xtdevelopment MTV).
+// (UI COLOR UPDATE: all borders/buttons/text now follow live UI color picker)
 
 (function () {
   // 0) Read playlist from separate file
@@ -32,7 +18,6 @@
 
   function shufflePlaylist() {
     playlist = rawList.slice();
-    // Fisher-Yates shuffle
     for (let i = playlist.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
@@ -70,6 +55,120 @@
 
   tvBtn.textContent = "WATCH AI CABLE TV";
 
+  // ---------------------------------------------------------------------------
+  // UI COLOR PICKER SUPPORT (same strategy as your other updated panels)
+  // ---------------------------------------------------------------------------
+
+  function readCssVar(styleObj, name) {
+    try {
+      const v = styleObj.getPropertyValue(name);
+      return v ? v.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getUIAccent() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+
+      const candidates = [
+        "--ui-accent",
+        "--ui-color",
+        "--meq-ui-accent",
+        "--meq-ui-color",
+        "--accent-color",
+        "--primary-color",
+        "--theme-accent",
+        "--picker-color",
+        "--picker-accent"
+      ];
+
+      for (const v of candidates) {
+        const a = readCssVar(rootStyle, v) || readCssVar(bodyStyle, v);
+        if (a) return a;
+      }
+
+      if (typeof window._meqUIColor === "string" && window._meqUIColor.trim()) {
+        return window._meqUIColor.trim();
+      }
+      if (typeof window._meqUIAccent === "string" && window._meqUIAccent.trim()) {
+        return window._meqUIAccent.trim();
+      }
+      if (typeof window.uiAccent === "string" && window.uiAccent.trim()) {
+        return window.uiAccent.trim();
+      }
+
+      const storageKeys = [
+        "uiAccent",
+        "uiColor",
+        "meqUIColor",
+        "meq-ui-accent",
+        "accentColor",
+        "themeAccent",
+        "pickerColor",
+        "pickerAccent"
+      ];
+      for (const k of storageKeys) {
+        const val = localStorage.getItem(k);
+        if (val && val.trim()) return val.trim();
+      }
+
+      const probes = ["#segmentLog", "#rightPanel", "#layoutBtn", ".action-btn", "#aiInput", "#aiSend"];
+      for (const sel of probes) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const cs = getComputedStyle(el);
+        const borders = [
+          cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor, cs.borderColor
+        ].filter(Boolean);
+
+        for (const bc of borders) {
+          if (bc && bc !== "transparent" && !/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(bc)) {
+            return bc;
+          }
+        }
+        if (cs.color && cs.color !== "transparent") return cs.color;
+      }
+    } catch {}
+    return "#0ff";
+  }
+
+  function getSoftHoverBg() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+      const soft =
+        readCssVar(rootStyle, "--soft-border") ||
+        readCssVar(bodyStyle, "--soft-border");
+      if (soft) return soft;
+    } catch {}
+    return "#033";
+  }
+
+  function styleActionButton(btn, accent, hoverBg) {
+    if (!btn) return;
+    btn.style.setProperty("border-color", accent, "important");
+    btn.style.setProperty("color", accent, "important");
+    btn.style.background = "#111";
+    btn.onmouseenter = () => { btn.style.background = hoverBg; };
+    btn.onmouseleave = () => { btn.style.background = "#111"; };
+  }
+
+  function stylePanelButton(btn, accent, hoverBg) {
+    if (!btn) return;
+    btn.style.background = "#111";
+    btn.style.color = accent;
+    btn.style.border = `1px solid ${accent}`;
+    btn.style.fontFamily = "monospace";
+    btn.style.fontSize = "11px";
+    btn.style.padding = "2px 8px";
+    btn.style.cursor = "pointer";
+    btn.onmouseenter = () => { btn.style.background = hoverBg; };
+    btn.onmouseleave = () => { btn.style.background = "#111"; };
+  }
+
   // 2) Create the TV panel
   const panel = document.createElement("div");
   panel.id = "tvPanel";
@@ -85,8 +184,12 @@
     z-index: 999;
     padding: 0;
     box-sizing: border-box;
-    display: none;
     flex-direction: column;
+    overflow: hidden;
+
+    /* Let dynamic styles use this */
+    --meq-accent: #0ff;
+    --meq-soft: #033;
   `;
 
   panel.innerHTML = `
@@ -95,60 +198,22 @@
       justify-content:space-between;
       align-items:center;
       padding:4px 8px;
-      border-bottom:1px solid #0ff;
+      border-bottom:1px solid var(--meq-accent);
       background:#050505;
       font-family:monospace;
       font-size:12px;
-      color:#0ff;
+      color:var(--meq-accent);
       gap: 6px;
+      box-sizing:border-box;
+      flex:0 0 auto;
     ">
       <span>AI CABLE TV • YouTube Playlist</span>
       <div style="display:flex; gap:4px;">
-        <button id="tvPanelView" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">View Videos</button>
-        <button id="tvPanelMusicVideos" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">Music Videos</button>
-        <button id="tvPanelNext" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">NEXT VIDEO</button>
-        <button id="tvPanelPopout" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">Popout video</button>
-        <button id="tvPanelClose" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">CLOSE</button>
+        <button id="tvPanelView">View Videos</button>
+        <button id="tvPanelMusicVideos">Music Videos</button>
+        <button id="tvPanelNext">NEXT VIDEO</button>
+        <button id="tvPanelPopout">Popout video</button>
+        <button id="tvPanelClose">CLOSE</button>
       </div>
     </div>
     <div
@@ -156,8 +221,10 @@
       style="
         width:100%;
         flex: 1 1 auto;
+        min-height:0;
         height:auto;
         overflow:hidden;
+        position:relative;
       ">
     </div>
   `;
@@ -171,6 +238,74 @@
   const viewBtn           = panel.querySelector("#tvPanelView");
   const musicBtn          = panel.querySelector("#tvPanelMusicVideos");
   const playerContainerId = "tvPlayerContainer";
+
+  // ---------------------------------------------------------------------------
+  // Accent applier (runs live)
+  // ---------------------------------------------------------------------------
+
+  let lastAccent = null;
+  function applyAccentEverywhere() {
+    const accent = getUIAccent();
+    if (!accent || accent === lastAccent) return;
+    lastAccent = accent;
+
+    const soft = getSoftHoverBg();
+
+    panel.style.setProperty("--meq-accent", accent);
+    panel.style.setProperty("--meq-soft", soft);
+
+    panel.style.borderColor = accent;
+    if (headerEl) {
+      headerEl.style.color = accent;
+      headerEl.style.borderBottomColor = accent;
+    }
+
+    // Header buttons
+    stylePanelButton(viewBtn, accent, soft);
+    stylePanelButton(musicBtn, accent, soft);
+    stylePanelButton(nextBtn, accent, soft);
+    stylePanelButton(popoutBtn, accent, soft);
+    stylePanelButton(closeBtn, accent, soft);
+
+    // Top action button in right panel
+    styleActionButton(tvBtn, accent, soft);
+
+    // If MV overlay is open, restyle it + its rows
+    const container = document.getElementById(playerContainerId);
+    const overlay = container?.querySelector("#mvPlaylistOverlay");
+    if (overlay) {
+      overlay.style.borderLeftColor = accent;
+      overlay.style.color = accent;
+
+      const ovHeader = overlay.querySelector(".mvOverlayHeader");
+      if (ovHeader) {
+        ovHeader.style.borderBottomColor = accent;
+        ovHeader.style.color = accent;
+      }
+
+      const ovClose = overlay.querySelector("#mvOverlayClose");
+      if (ovClose) stylePanelButton(ovClose, accent, soft);
+
+      overlay.querySelectorAll(".mvRow").forEach(row => {
+        const isCurrent = row.dataset.current === "1";
+        row.style.borderColor = isCurrent ? accent : soft;
+        row.style.background = isCurrent ? accent : "#000";
+        row.style.color = isCurrent ? "#000" : accent;
+      });
+    }
+
+    // MV wrapper borders that are already in DOM
+    const mvTitle = container?.querySelector("#mvTitle");
+    const mvAuthor = container?.querySelector("#mvAuthor");
+    if (mvTitle) mvTitle.style.borderBottomColor = accent;
+    if (mvAuthor) mvAuthor.style.borderTopColor = accent;
+
+    const mvAudioHolder = container?.querySelector("#mvAudioHolder");
+    if (mvAudioHolder) mvAudioHolder.style.borderTopColor = accent;
+  }
+
+  setInterval(applyAccentEverywhere, 300);
+  applyAccentEverywhere();
 
   // ---------------------------------------------------------------------------
   // 3) YouTube IFrame API loader & player
@@ -283,7 +418,7 @@
     container.innerHTML = `
       <iframe
         src="https://xtdevelopment.net/mtv/"
-        style="width:100%; height:100%; border:none;"
+        style="width:100%; height:100%; border:none; display:block;"
         loading="lazy"
       ></iframe>
     `;
@@ -295,17 +430,15 @@
   // ---------------------------------------------------------------------------
   // 3.3) MUSIC VIDEOS MODE
   // ---------------------------------------------------------------------------
-  let musicVideosList = [];      // { title, audioUrl, videoUrl, author }
+  let musicVideosList = [];
   let currentMusicIndex = -1;
   let musicVideosLoaded = false;
   let mvAudioEl = null;
   let mvVideoEl = null;
 
-  // random order for music videos
   let musicOrder = [];
   let currentMusicOrderIndex = -1;
 
-  // overlay playlist state
   let mvOverlayOpen = false;
 
   function shuffleMusicOrder() {
@@ -403,7 +536,7 @@
       });
   }
 
-  // Inject dark audio styling
+  // Inject dark audio styling (accent-aware)
   function ensureMeqTvPlayerStyles() {
     if (document.getElementById("meqTvPlayerStyles")) return;
 
@@ -413,7 +546,8 @@
       #tvPanel #mvAudioHolder {
         padding: 8px 10px !important;
         background: #1e1e1e !important;
-        border-top: 1px solid #0ff !important;
+        border-top: 1px solid var(--meq-accent, #0ff) !important;
+        box-sizing: border-box !important;
       }
       #tvPanel audio#mvAudio {
         width: 100% !important;
@@ -458,9 +592,11 @@
     const container = document.getElementById(playerContainerId);
     if (!container) return;
 
-    // if already there, remove before rebuilding
     const old = container.querySelector("#mvPlaylistOverlay");
     if (old) old.remove();
+
+    const accent = getUIAccent();
+    const soft  = getSoftHoverBg();
 
     const overlay = document.createElement("div");
     overlay.id = "mvPlaylistOverlay";
@@ -468,76 +604,75 @@
       position:absolute;
       inset:0;
       background: rgba(0,0,0,0.92);
-      border-left:1px solid #0ff;
+      border-left:1px solid ${accent};
       z-index: 50;
       display:flex;
       flex-direction:column;
       font-family:monospace;
-      color:#0ff;
+      color:${accent};
+      box-sizing:border-box;
     `;
 
     overlay.innerHTML = `
-      <div style="
+      <div class="mvOverlayHeader" style="
         display:flex;
         justify-content:space-between;
         align-items:center;
         padding:6px 8px;
-        border-bottom:1px solid #0ff;
+        border-bottom:1px solid ${accent};
         background:#050505;
         font-size:12px;
         flex:0 0 auto;
+        color:${accent};
+        box-sizing:border-box;
       ">
         <span>Music Videos Playlist</span>
-        <button id="mvOverlayClose" style="
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          font-family:monospace;
-          font-size:11px;
-          padding:2px 8px;
-          cursor:pointer;
-        ">CLOSE</button>
+        <button id="mvOverlayClose">CLOSE</button>
       </div>
       <div id="mvOverlayList" style="
         flex:1 1 auto;
         overflow-y:auto;
         padding:6px;
+        box-sizing:border-box;
       "></div>
     `;
+
+    const closeOverlayBtn = overlay.querySelector("#mvOverlayClose");
+    stylePanelButton(closeOverlayBtn, accent, soft);
 
     const listEl = overlay.querySelector("#mvOverlayList");
     if (listEl) {
       musicVideosList.forEach((entry, idx) => {
         const row = document.createElement("div");
+        row.className = "mvRow";
         const isCurrent = idx === currentMusicIndex;
+        row.dataset.current = isCurrent ? "1" : "0";
         row.style.cssText = `
           padding:6px 8px;
           margin:2px 0;
-          border:1px solid ${isCurrent ? "#fff" : "#033"};
-          background:${isCurrent ? "#0aa" : "#000"};
-          color:${isCurrent ? "#000" : "#0ff"};
+          border:1px solid ${isCurrent ? accent : soft};
+          background:${isCurrent ? accent : "#000"};
+          color:${isCurrent ? "#000" : accent};
           cursor:pointer;
           font-size:12px;
           white-space:nowrap;
           overflow:hidden;
           text-overflow:ellipsis;
+          box-sizing:border-box;
         `;
         row.textContent = entry.title || `(untitled ${idx+1})`;
-row.addEventListener("click", () => {
-  // close overlay when picking a song
-  mvOverlayOpen = false;     // IMPORTANT: prevents renderMusicVideo from rebuilding it
-  currentMusicIndex = idx;
-  renderMusicVideo(currentMusicIndex);
-  removeMusicOverlay();     // safety (new DOM won't have it anyway)
-});
-
+        row.addEventListener("click", () => {
+          mvOverlayOpen = false;
+          currentMusicIndex = idx;
+          renderMusicVideo(currentMusicIndex);
+          removeMusicOverlay();
+        });
         listEl.appendChild(row);
       });
     }
 
-    overlay.querySelector("#mvOverlayClose")?.addEventListener("click", removeMusicOverlay);
+    closeOverlayBtn?.addEventListener("click", removeMusicOverlay);
 
-    // attach to wrapper so it sits over the MV
     const wrapper = container.querySelector("#musicVideoWrapper");
     if (wrapper) {
       wrapper.appendChild(overlay);
@@ -560,6 +695,8 @@ row.addEventListener("click", () => {
     const entry = musicVideosList[index];
     if (!entry) return;
 
+    const accent = getUIAccent();
+
     container.innerHTML = `
       <div id="musicVideoWrapper" style="
         position:relative;
@@ -568,15 +705,17 @@ row.addEventListener("click", () => {
         width:100%;
         height:100%;
         background:#000;
-        color:#0ff;
+        color:${accent};
         font-family:monospace;
         overflow:hidden;
+        box-sizing:border-box;
       ">
         <div id="mvTitle" style="
           padding:4px 8px;
           font-size:14px;
           font-weight:bold;
-          border-bottom:1px solid #0ff;
+          border-bottom:1px solid ${accent};
+          box-sizing:border-box;
         "></div>
         <div id="mvVideoHolder" style="
           flex:1 1 auto;
@@ -596,11 +735,10 @@ row.addEventListener("click", () => {
           padding:4px 8px;
           font-size:12px;
           opacity:0.8;
-          border-top:1px solid #0ff;
+          border-top:1px solid ${accent};
+          box-sizing:border-box;
         "></div>
-        <div id="mvAudioHolder">
-          <audio id="mvAudio" controls></audio>
-        </div>
+        <div id="mvAudioHolder" style="border-top:1px solid ${accent};"></div>
       </div>
     `;
 
@@ -620,6 +758,13 @@ row.addEventListener("click", () => {
       mvVideoEl.play().catch(() => {});
     }
 
+    // Rebuild audio holder with controls (keeps style tag working)
+    const audioHolder = container.querySelector("#mvAudioHolder");
+    if (audioHolder) {
+      audioHolder.innerHTML = `<audio id="mvAudio" controls></audio>`;
+    }
+    mvAudioEl = container.querySelector("#mvAudio");
+
     if (mvAudioEl) {
       mvAudioEl.src = entry.audioUrl;
       mvAudioEl.controls = true;
@@ -632,8 +777,8 @@ row.addEventListener("click", () => {
       mvAudioEl.play().catch(() => {});
     }
 
-    // if overlay was open, rebuild it on top of new DOM
     if (mvOverlayOpen) buildMusicOverlay();
+    applyAccentEverywhere();
   }
 
   function startMusicVideosMode() {
@@ -676,7 +821,6 @@ row.addEventListener("click", () => {
     isExternalViewActive = false;
     destroyPlayer();
     exitMusicVideosMode();
-
     loadMusicVideosList(() => startMusicVideosMode());
   }
 
@@ -786,6 +930,7 @@ row.addEventListener("click", () => {
       musicBtn.disabled = false;
     }
 
+    applyAccentEverywhere();
     panel.style.display = "flex";
 
     shufflePlaylist();
@@ -823,25 +968,24 @@ row.addEventListener("click", () => {
         playNextVideo();
       }
       updateMusicBtnLabel();
+      applyAccentEverywhere();
     });
   }
 
   if (viewBtn) {
     viewBtn.addEventListener("click", () => {
       if (isMusicVideosMode) {
-        // MV mode = overlay playlist
         toggleMusicOverlay();
       } else {
-        // normal mode = external iframe
         loadExternalVideoSite();
       }
+      applyAccentEverywhere();
     });
   }
 
   if (musicBtn) {
     musicBtn.addEventListener("click", () => {
       if (isMusicVideosMode) {
-        // "Videos" -> go back to YouTube
         exitMusicVideosMode();
         isExternalViewActive = false;
 
@@ -850,12 +994,10 @@ row.addEventListener("click", () => {
 
         ensureYouTubeAPI(createPlayer);
       } else {
-        // "Music Videos" -> enter MV mode
         enterMusicVideosMode();
       }
       updateMusicBtnLabel();
+      applyAccentEverywhere();
     });
   }
-
-  // window.addEventListener("beforeunload", destroyPlayer);
 })();

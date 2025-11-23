@@ -5,6 +5,11 @@
 // ADDED: DTMF-like dial tones on keypad button presses.
 // ADDED: Auto dial controls (count + interval in ms).
 // ADDED: Upload Dial Log -> read txt file, feed digits directly to nofurs handlers.
+//
+// UI UPDATE:
+//  - All borders / text / buttons / inputs / keypad use the live UI picker accent.
+//  - Keypad digit color is forced with !important to beat any CSS overrides.
+//  - Canvas / dialing behavior untouched.
 
 (function () {
   // 1) Find the OPEN TOOLKIT button
@@ -25,6 +30,116 @@
   // Normalize button label
   toolkitBtn.textContent = "OPEN TOOLKIT";
 
+  // ---------------------------------------------------------------------------
+  // UI COLOR PICKER SUPPORT (robust, same approach as music panel)
+  // ---------------------------------------------------------------------------
+
+  function readCssVar(styleObj, name) {
+    try {
+      const v = styleObj.getPropertyValue(name);
+      return v ? v.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getUIAccent() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+
+      const candidates = [
+        "--ui-accent",
+        "--ui-color",
+        "--meq-ui-accent",
+        "--meq-ui-color",
+        "--accent-color",
+        "--primary-color",
+        "--theme-accent",
+        "--picker-color",
+        "--picker-accent"
+      ];
+
+      for (const v of candidates) {
+        const a = readCssVar(rootStyle, v) || readCssVar(bodyStyle, v);
+        if (a) return a;
+      }
+
+      if (typeof window._meqUIColor === "string" && window._meqUIColor.trim()) {
+        return window._meqUIColor.trim();
+      }
+      if (typeof window._meqUIAccent === "string" && window._meqUIAccent.trim()) {
+        return window._meqUIAccent.trim();
+      }
+      if (typeof window.uiAccent === "string" && window.uiAccent.trim()) {
+        return window.uiAccent.trim();
+      }
+
+      const storageKeys = [
+        "uiAccent",
+        "uiColor",
+        "meqUIColor",
+        "meq-ui-accent",
+        "accentColor",
+        "themeAccent",
+        "pickerColor",
+        "pickerAccent"
+      ];
+      for (const k of storageKeys) {
+        const val = localStorage.getItem(k);
+        if (val && val.trim()) return val.trim();
+      }
+
+      const probeSelectors = [
+        "#segmentLog",
+        "#rightPanel",
+        "#layoutBtn",
+        ".action-btn",
+        "#aiInput",
+        "#aiSend"
+      ];
+
+      for (const sel of probeSelectors) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const cs = getComputedStyle(el);
+
+        const borderCols = [
+          cs.borderTopColor,
+          cs.borderRightColor,
+          cs.borderBottomColor,
+          cs.borderLeftColor,
+          cs.borderColor
+        ].filter(Boolean);
+
+        for (const bc of borderCols) {
+          if (bc && bc !== "transparent" && !/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(bc)) {
+            return bc;
+          }
+        }
+
+        if (cs.color && cs.color !== "transparent") {
+          return cs.color;
+        }
+      }
+    } catch {}
+
+    return "#0ff";
+  }
+
+  function getSoftHoverBg() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+      const soft =
+        readCssVar(rootStyle, "--soft-border") ||
+        readCssVar(bodyStyle, "--soft-border");
+      if (soft) return soft;
+    } catch {}
+
+    return "#033";
+  }
+
   // 2) Create the floating dialer panel
   const panel = document.createElement("div");
   panel.id = "toolkitPanel";
@@ -34,7 +149,7 @@
     right: 20px;
     bottom: 90px;
     width: 220px;
-    height: 330px;
+    height: 340px;
     background: #111;
     border: 1px solid #0ff;
     border-radius: 6px;
@@ -60,15 +175,7 @@
       text-shadow: 0 0 3px #000;
     ">
       <span>MEQUA TOOLKIT • DIALER</span>
-      <button id="toolkitClose" style="
-        background:#111;
-        color:#0ff;
-        border:1px solid #0ff;
-        font-size:10px;
-        padding:0 6px;
-        cursor:pointer;
-        border-radius:3px;
-      ">X</button>
+      <button id="toolkitClose">X</button>
     </div>
     <div style="padding:6px; display:flex; flex-direction:column; height:calc(100% - 22px);">
       <div id="dialerDisplay" style="
@@ -93,33 +200,9 @@
         margin-bottom:4px;
         font-size:10px;
       ">
-        <button id="autoDialStart" style="
-          flex:0 0 auto;
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          border-radius:3px;
-          padding:2px 6px;
-          cursor:pointer;
-        ">Auto dial</button>
-        <input id="autoDialCount" type="number" min="0" value="0" style="
-          flex:1 1 0;
-          background:#000;
-          color:#0ff;
-          width:50px;
-          border:1px solid #0ff;
-          border-radius:3px;
-          padding:2px 4px;
-        " placeholder="# dials (0=∞)" />
-        <input id="autoDialInterval" type="number" min="10" value="1000" style="
-          flex:1 1 0;
-          background:#000;
-          color:#0ff;
-          width:100px;
-          border:1px solid #0ff;
-          border-radius:3px;
-          padding:2px 4px;
-        " placeholder="ms" />
+        <button id="autoDialStart">Auto dial</button>
+        <input id="autoDialCount" type="number" min="0" value="0" placeholder="# dials (0=∞)" />
+        <input id="autoDialInterval" type="number" min="10" value="1000" placeholder="ms" />
       </div>
 
       <div id="dialerPad" style="
@@ -129,51 +212,18 @@
         grid-auto-rows: 40px;
         gap:4px;
       "></div>
+
       <!-- Upload Dial Log row (under CALL) -->
       <div style="margin-top:4px;">
-        <button id="uploadDialLog" style="
-          width:100%;
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          border-radius:3px;
-          font-size:11px;
-          cursor:pointer;
-          padding:3px 4px;
-        ">Upload Dial Log</button>
+        <button id="uploadDialLog">Upload Dial Log</button>
         <input id="dialLogFileInput" type="file" accept=".txt" style="display:none;" />
       </div>
+
       <div style="margin-top:6px; display:flex; gap:4px;">
-        <button id="dialerBackspace" style="
-          flex:1;
-          background:#111;
-          color:#0ff;
-          border:1px solid #0ff;
-          border-radius:3px;
-          font-size:11px;
-          cursor:pointer;
-        ">⌫</button>
-        <button id="dialerClear" style="
-          flex:1;
-          background:#300;
-          color:#f66;
-          border:1px solid #f00;
-          border-radius:3px;
-          font-size:11px;
-          cursor:pointer;
-        ">CLR</button>
-        <button id="dialerCall" style="
-          flex:1;
-          background:#030;
-          color:#0f0;
-          border:1px solid #0f0;
-          border-radius:3px;
-          font-size:11px;
-          cursor:pointer;
-        ">CALL</button>
+        <button id="dialerBackspace">⌫</button>
+        <button id="dialerClear">CLR</button>
+        <button id="dialerCall">CALL</button>
       </div>
-
-
     </div>
   `;
 
@@ -197,6 +247,125 @@
   const dialLogFileInput = panel.querySelector("#dialLogFileInput");
 
   // ---------------------------------------------------------------------------
+  // APPLY ACCENT TO TOOLKIT UI
+  // ---------------------------------------------------------------------------
+  let lastAccent = null;
+
+  function styleButton(btn, accent, hoverBg, opts = {}) {
+    if (!btn) return;
+    const {
+      bg = "#111",
+      fg = accent,
+      border = accent,
+      radius = "3px",
+      padding = "2px 6px",
+      fontSize = "11px",
+      weight = "bold",
+      width = null,
+      flex = null
+    } = opts;
+
+    btn.style.background = bg;
+    btn.style.color = fg;
+    btn.style.border = `1px solid ${border}`;
+    btn.style.borderRadius = radius;
+    btn.style.fontFamily = "monospace";
+    btn.style.fontSize = fontSize;
+    btn.style.fontWeight = weight;
+    btn.style.cursor = "pointer";
+    btn.style.padding = padding;
+    if (width) btn.style.width = width;
+    if (flex) btn.style.flex = flex;
+
+    btn.onmouseenter = () => { btn.style.background = hoverBg; };
+    btn.onmouseleave = () => { btn.style.background = bg; };
+  }
+
+  function styleInput(inp, accent) {
+    if (!inp) return;
+    inp.style.background = "#000";
+    inp.style.color = accent;
+    inp.style.border = `1px solid ${accent}`;
+    inp.style.borderRadius = "3px";
+    inp.style.padding = "2px 4px";
+    inp.style.fontFamily = "monospace";
+    inp.style.fontSize = "10px";
+    inp.style.boxSizing = "border-box";
+    inp.style.outline = "none";
+  }
+
+  function applyAccent() {
+    const accent = getUIAccent();
+    if (!accent || accent === lastAccent) return;
+    lastAccent = accent;
+
+    const hoverBg = getSoftHoverBg();
+
+    panel.style.borderColor = accent;
+    panel.style.color = accent;
+    panel.style.boxShadow = `0 0 12px ${accent}55`;
+
+    if (headerEl) {
+      headerEl.style.color = accent;
+      headerEl.style.borderBottomColor = accent;
+    }
+
+    // header close
+    styleButton(closeBtn, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      fontSize:"10px", padding:"0 6px", weight:"bold"
+    });
+
+    // auto dial row
+    styleButton(autoDialBtn, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      fontSize:"10px", padding:"2px 6px", weight:"bold"
+    });
+    styleInput(autoDialCountInput, accent);
+    styleInput(autoDialIntervalInput, accent);
+
+    // upload button
+    styleButton(uploadDialLogBtn, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      width:"100%", padding:"3px 4px", fontSize:"11px", weight:"bold"
+    });
+
+    // bottom row buttons
+    styleButton(backspace, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
+    });
+    styleButton(clearBtn, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
+    });
+    styleButton(callBtn, accent, hoverBg, {
+      bg:"#111", fg:accent, border:accent,
+      flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
+    });
+
+    // keypad digits + rings (force important so CSS can't override)
+    const keypadBtns = padEl ? padEl.querySelectorAll("button") : [];
+    keypadBtns.forEach((b) => {
+      b.style.setProperty("color", accent, "important");
+      b.style.setProperty("border-color", accent, "important");
+
+      // subtle accent glow, keep metal background
+      b.style.boxShadow =
+        `inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${accent}55`;
+      b.style.textShadow = `0 0 3px #000, 0 0 4px ${accent}44`;
+    });
+
+    if (displayEl) {
+      displayEl.style.borderColor = accent;
+      displayEl.style.boxShadow = `inset 0 0 6px ${accent}22`;
+    }
+  }
+
+  setInterval(applyAccent, 300);
+  applyAccent();
+
+  // ---------------------------------------------------------------------------
   // 2.5) SIMPLE DTMF-LIKE AUDIO FOR KEYS
   // ---------------------------------------------------------------------------
 
@@ -211,7 +380,6 @@
     return audioCtx;
   }
 
-  // DTMF frequency map (low + high tone pairs)
   const DTMF_FREQS = {
     "1": [697, 1209],
     "2": [697, 1336],
@@ -234,7 +402,7 @@
     const freqs = DTMF_FREQS[key];
     if (!freqs) return;
 
-    const duration = 0.12; // ~120ms like a quick keypress
+    const duration = 0.12;
     const now = ctx.currentTime;
 
     const gain = ctx.createGain();
@@ -254,21 +422,22 @@
     });
   }
 
-  // 3) Build the keypad (old-school metal dialer style)
+  // 3) Build the keypad
   const keys = ["1","2","3","4","5","6","7","8","9","*","0","#"];
+  const initialAccent = getUIAccent();
 
   keys.forEach((key) => {
     const btn = document.createElement("button");
     btn.textContent = key;
     btn.style.cssText = `
       background: radial-gradient(circle at 30% 20%, #666 0, #333 40%, #111 100%);
-      border: 1px solid #777;
+      border: 1px solid ${initialAccent};
       border-radius: 50%;
-      color:#0ff;
+      color:${initialAccent};
       font-size:14px;
-      text-shadow:0 0 3px #000;
+      text-shadow:0 0 3px #000, 0 0 4px ${initialAccent}44;
       cursor:pointer;
-      box-shadow: inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8);
+      box-shadow: inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${initialAccent}55;
     `;
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -286,15 +455,16 @@
 
     btn.addEventListener("click", () => {
       const current = displayEl.textContent || "";
-      if (current.length >= 17) return; // hard cap at 17 chars in display as well
+      if (current.length >= 17) return;
       displayEl.textContent = current + key;
-
-      // play dial tone for this key
       playDialTone(key);
     });
 
     padEl.appendChild(btn);
   });
+
+  // recolor keypad NOW that they exist
+  applyAccent();
 
   // 4) Dialer controls (local display)
   if (backspace) {
@@ -357,12 +527,9 @@
   function dialOmniverseSequence(rawNumber) {
     if (!rawNumber) return;
 
-    // Only numeric digits, max 17
     let digits = (rawNumber.match(/[0-9]/g) || []).join("");
     if (!digits) return;
-    if (digits.length > 17) {
-      digits = digits.slice(0, 17);
-    }
+    if (digits.length > 17) digits = digits.slice(0, 17);
 
     const intervalMs = 100;
     digits.split("").forEach((ch, idx) => {
@@ -372,9 +539,7 @@
     });
   }
 
-  // ---------------------------------------------------------------------------
   // Upload Dial Log -> parse file & feed digits directly to nofurs handlers
-  // ---------------------------------------------------------------------------
   function processDialLogFile(text) {
     if (!text) return;
 
@@ -387,26 +552,19 @@
 
       const after = line.slice(idx + 1);
       const digits = (after.match(/[0-9]/g) || []).join("");
-      if (digits) {
-        sequences.push(digits);
-      }
+      if (digits) sequences.push(digits);
     });
 
     if (!sequences.length) return;
 
-    // As fast as possible: directly call dialOmniverseDigit for each digit.
-    // No keypad button presses, no artificial delay.
     sequences.forEach((seq) => {
       for (const ch of seq) {
         dialOmniverseDigit(ch);
       }
     });
 
-    // Optional: brief status in display (non-blocking)
     displayEl.textContent = `Uploaded ${sequences.length} segments`;
-    setTimeout(() => {
-      displayEl.textContent = "";
-    }, 1500);
+    setTimeout(() => { displayEl.textContent = ""; }, 1500);
   }
 
   // Auto dial logic
@@ -452,11 +610,8 @@
         return;
       }
 
-      // perform one dial
       dialOmniverseSequence(autoDialDigits);
-      if (isFinite(autoDialRemaining)) {
-        autoDialRemaining--;
-      }
+      if (isFinite(autoDialRemaining)) autoDialRemaining--;
 
       if (autoDialRemaining === 0) {
         stopAutoDial();
@@ -471,11 +626,8 @@
 
   if (autoDialBtn) {
     autoDialBtn.addEventListener("click", () => {
-      if (autoDialActive) {
-        stopAutoDial();
-      } else {
-        startAutoDial();
-      }
+      if (autoDialActive) stopAutoDial();
+      else startAutoDial();
     });
   }
 
@@ -500,8 +652,6 @@
       };
 
       reader.readAsText(file);
-
-      // reset input so selecting the same file again still fires change
       input.value = "";
     });
   }
@@ -517,7 +667,6 @@
       const displayDigits = rawDigits.length > 17 ? rawDigits.slice(0,17) : rawDigits;
 
       displayEl.textContent = "DIALING " + displayDigits + "...";
-
       dialOmniverseSequence(rawDigits);
 
       setTimeout(() => {
@@ -565,21 +714,18 @@
 
   // 7) Open / close behavior
   function openPanel() {
+    applyAccent();
     panel.style.display = "block";
   }
 
   function closePanelFn() {
     panel.style.display = "none";
-    // stop auto dial when panel closes
     stopAutoDial();
   }
 
   toolkitBtn.addEventListener("click", () => {
-    if (panel.style.display === "block") {
-      closePanelFn();
-    } else {
-      openPanel();
-    }
+    if (panel.style.display === "block") closePanelFn();
+    else openPanel();
   });
 
   if (closeBtn) {

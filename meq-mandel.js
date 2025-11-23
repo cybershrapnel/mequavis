@@ -2,6 +2,8 @@
 // Mandelbrot viewer driven by window.segmentHistory / global segmentHistory.
 // No more mandelbrotZoomStep(fullAddress) from the click handler.
 // The right-panel button just calls global showMandelPanel().
+// UI UPDATE: NEXT / DOWNLOAD / PLAY + mandelInfo line follow UI color picker.
+// Header title + close button unchanged.
 
 (function () {
   if (window._meqMandelPatched) return;
@@ -11,28 +13,156 @@
   let mandelCanvas  = null;
   let mandelCtx     = null;
 
+  // ---------------------------------------------------------------------------
+  // UI COLOR PICKER SUPPORT (buttons + mandelInfo line)
+  // ---------------------------------------------------------------------------
+
+  function readCssVar(styleObj, name) {
+    try {
+      const v = styleObj.getPropertyValue(name);
+      return v ? v.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getUIAccent() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+
+      const candidates = [
+        "--ui-accent",
+        "--ui-color",
+        "--meq-ui-accent",
+        "--meq-ui-color",
+        "--accent-color",
+        "--primary-color",
+        "--theme-accent",
+        "--picker-color",
+        "--picker-accent"
+      ];
+
+      for (const v of candidates) {
+        const a = readCssVar(rootStyle, v) || readCssVar(bodyStyle, v);
+        if (a) return a;
+      }
+
+      if (typeof window._meqUIColor === "string" && window._meqUIColor.trim()) {
+        return window._meqUIColor.trim();
+      }
+      if (typeof window._meqUIAccent === "string" && window._meqUIAccent.trim()) {
+        return window._meqUIAccent.trim();
+      }
+      if (typeof window.uiAccent === "string" && window.uiAccent.trim()) {
+        return window.uiAccent.trim();
+      }
+
+      const storageKeys = [
+        "uiAccent",
+        "uiColor",
+        "meqUIColor",
+        "meq-ui-accent",
+        "accentColor",
+        "themeAccent",
+        "pickerColor",
+        "pickerAccent"
+      ];
+      for (const k of storageKeys) {
+        const val = localStorage.getItem(k);
+        if (val && val.trim()) return val.trim();
+      }
+
+      const probes = ["#segmentLog", "#rightPanel", "#layoutBtn", ".action-btn", "#aiInput", "#aiSend"];
+      for (const sel of probes) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const cs = getComputedStyle(el);
+        const borders = [
+          cs.borderTopColor, cs.borderRightColor, cs.borderBottomColor, cs.borderLeftColor, cs.borderColor
+        ].filter(Boolean);
+
+        for (const bc of borders) {
+          if (bc && bc !== "transparent" && !/rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(bc)) {
+            return bc;
+          }
+        }
+        if (cs.color && cs.color !== "transparent") return cs.color;
+      }
+    } catch {}
+    return "#0ff";
+  }
+
+  function getSoftHoverBg() {
+    try {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const bodyStyle = getComputedStyle(document.body);
+      const soft =
+        readCssVar(rootStyle, "--soft-border") ||
+        readCssVar(bodyStyle, "--soft-border");
+      if (soft) return soft;
+    } catch {}
+    return "#033";
+  }
+
+  let _lastAccent = null;
+  function restyleMandelUI() {
+    const accent = getUIAccent();
+    if (!accent || accent === _lastAccent) {
+      // still ensure info line survives DOM resets
+      const info = document.getElementById("mandelInfo");
+      if (info && accent) info.style.color = accent;
+      return;
+    }
+    _lastAccent = accent;
+
+    const hoverBg = getSoftHoverBg();
+    const ids = ["mandelNext", "mandelDownload", "mandelPlay"];
+
+    ids.forEach(id => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+
+      btn.style.background = "#111";
+      btn.style.color = accent;
+      btn.style.border = `1px solid ${accent}`;
+      btn.style.fontFamily = "monospace";
+      btn.style.fontSize = "11px";
+      btn.style.padding = "2px 8px";
+      btn.style.cursor = "pointer";
+
+      btn.onmouseenter = () => { btn.style.background = hoverBg; };
+      btn.onmouseleave = () => { btn.style.background = "#111"; };
+    });
+
+    // ✅ Info line follows accent now
+    const info = document.getElementById("mandelInfo");
+    if (info) {
+      info.style.color = accent;
+    }
+  }
+
+  setInterval(restyleMandelUI, 300);
+
   // Current view
   let mandelCenterX   = -0.75;
   let mandelCenterY   = 0.0;
-  let mandelScale     = 3.0;   // width of visible region in the complex plane
+  let mandelScale     = 3.0;
   let mandelZoomLevel = 0;
 
   // Playback / segment stepping
-  let mandelPlaybackIndex   = 0;      // index into segment history
+  let mandelPlaybackIndex   = 0;
   let mandelPlaybackTimer   = null;
   let mandelPlaybackPlaying = false;
-  const MANDEL_PLAY_DELAY   = 1500;   // ms between auto-steps
+  const MANDEL_PLAY_DELAY   = 1500;
 
   // Last *good* boundary view we know about
   let lastInterestingCenterX = -0.75;
   let lastInterestingCenterY = 0.0;
   let lastInterestingScale   = 3.0;
-  let hasLastInteresting     = true;  // base view is interesting
+  let hasLastInteresting     = true;
 
-  // Minimum "interestingness" score required to accept a new zoom
   const MIN_INTERESTING_SCORE = 10;
-
-  // ========= BASIC UTILS =========
 
   function addressToDigits(addressStr) {
     const digits = (addressStr || "0").replace(/\D/g, "");
@@ -51,17 +181,14 @@
     const xVal  = parseInt(xStr, 10) || 0;
     const yVal  = parseInt(yStr, 10) || 0;
 
-    const nx = xVal / max; // 0..1
-    const ny = yVal / max; // 0..1
+    const nx = xVal / max;
+    const ny = yVal / max;
 
-    // Standard Mandelbrot window:
-    // real: [-2, 1], imag: [-1.5, 1.5]
     const cx = -2   + nx * 3;
     const cy = -1.5 + ny * 3;
     return { cx, cy };
   }
 
-  // Render full 800x800 view at current center/scale
   function drawMandelbrot() {
     if (!mandelCanvas || !mandelCtx) return;
     const w = mandelCanvas.width;
@@ -87,7 +214,6 @@
 
         const idx = (py * w + px) * 4;
         if (iter === maxIter) {
-          // In set: black
           data[idx]     = 0;
           data[idx + 1] = 0;
           data[idx + 2] = 0;
@@ -104,13 +230,9 @@
     mandelCtx.putImageData(img, 0, 0);
   }
 
-  // ========= FAST "INTERESTINGNESS" EVALUATION =========
-  // Coarse grid + low iterations to detect whether a region is actually
-  // on a detailed Mandelbrot boundary, vs flat gradient / solid color.
-
   function evaluateCenterInteresting(cx, cy, scale) {
-    const grid    = 22;     // 22x22 = 484 samples
-    const maxIter = 60;     // low, just for classification
+    const grid    = 22;
+    const maxIter = 60;
 
     let sawInside  = false;
     let sawOutside = false;
@@ -143,19 +265,13 @@
       }
     }
 
-    // Pure black or pure exterior: boring, treat as "all one color".
     if (!sawInside || !sawOutside) return 0;
 
     const spread = maxEscIter - minEscIter;
-
-    // If spread is too small, it's basically a flat gradient → boring.
     if (spread <= maxIter * 0.30) return 0;
-
-    // Score = how wide the escape band is.
     return spread;
   }
 
-  // Deterministic pseudo-random generator seeded from address digits
   function makeAddressRng(addressStr) {
     const digits = addressToDigits(addressStr);
     let seed = 0;
@@ -177,8 +293,6 @@
     };
   }
 
-  // Given the last interesting view + an address, pick candidate offsets
-  // near that point at a *specific target scale* and choose the most detailed.
   function findFractalCenterForStep(addressStr, targetScale) {
     const baseCx = hasLastInteresting ? lastInterestingCenterX : -0.75;
     const baseCy = hasLastInteresting ? lastInterestingCenterY : 0.0;
@@ -192,7 +306,7 @@
 
     for (let i = 0; i < numCandidates; i++) {
       const angle = 2 * Math.PI * rng();
-      const rFrac = 0.05 + 0.55 * rng(); // between 0.05 and 0.60 of view width
+      const rFrac = 0.05 + 0.55 * rng();
       const r     = targetScale * rFrac;
 
       const cx = baseCx + Math.cos(angle) * r;
@@ -206,14 +320,8 @@
       }
     }
 
-    return {
-      cx: bestCx,
-      cy: bestCy,
-      score: bestScore
-    };
+    return { cx: bestCx, cy: bestCy, score: bestScore };
   }
-
-  // ========= SEGMENT / INFO HELPERS =========
 
   function getSegmentHistoryList() {
     if (Array.isArray(window.segmentHistory) && window.segmentHistory.length) {
@@ -229,15 +337,11 @@
         window.segmentHistory = segmentHistory;
         return segmentHistory;
       }
-    } catch (e) {
-      // segmentHistory might not exist; ignore
-    }
+    } catch (e) {}
 
     return null;
   }
 
-  // 🔹 Build a human-readable unique name for a segment entry:
-  //    G<gasket> or G<gasket>^<power> + S<segment>
   function makeSegmentName(entry) {
     if (!entry) return "";
     const g = entry.gasket;
@@ -245,9 +349,7 @@
     const s = entry.segment;
 
     let gPart = (g !== undefined) ? `G${g}` : "G?";
-    if (p !== undefined && p !== 1) {
-      gPart += `^${p}`;
-    }
+    if (p !== undefined && p !== 1) gPart += `^${p}`;
 
     const sPart = (s !== undefined) ? `S${s}` : "S?";
     return `${gPart} ${sPart}`;
@@ -301,9 +403,6 @@
     info.textContent = msg;
   }
 
-  // ========= STEP LOGIC (strict: 1 segment = 1 zoom if accepted) =========
-
-  // Returns true if the zoom was accepted (we zoomed in), false otherwise.
   function applyAddressStep(address, idx, total, segmentName) {
     const addr        = address || "0";
     const targetZoom  = mandelZoomLevel + 1;
@@ -312,8 +411,6 @@
     const proposal = findFractalCenterForStep(addr, targetScale);
     const score    = proposal.score || 0;
 
-    // If the candidate region is "all one color" / boring,
-    // DO NOT commit the zoom and DO NOT advance the segment index.
     if (score < MIN_INTERESTING_SCORE) {
       refreshInfoMessage(
         `${segmentName || "Segment"}: no usable boundary at this zoom, step not advanced.`
@@ -321,13 +418,11 @@
       return false;
     }
 
-    // Accept the new, interesting zoom
     mandelZoomLevel = targetZoom;
     mandelScale     = targetScale;
     mandelCenterX   = proposal.cx;
     mandelCenterY   = proposal.cy;
 
-    // Commit as new "last interesting" shoreline
     lastInterestingCenterX = mandelCenterX;
     lastInterestingCenterY = mandelCenterY;
     lastInterestingScale   = mandelScale;
@@ -362,7 +457,6 @@
       segInfo.segmentName
     );
 
-    // ✅ Only advance to the next segment if we actually zoomed.
     if (ok) {
       mandelPlaybackIndex = segInfo.index + 1;
     }
@@ -410,15 +504,13 @@
         }
       }
 
-      const ok = applyAddressStep(
+      applyAddressStep(
         info.address,
         info.index,
         info.total,
         info.segmentName
       );
 
-      // For autoplay, if step fails we still move on so the movie doesn't hang,
-      // but we don't change zoom on that step.
       mandelPlaybackIndex = info.index + 1;
     }, MANDEL_PLAY_DELAY);
 
@@ -435,8 +527,6 @@
       if (ok && btn) btn.textContent = "PAUSE";
     }
   }
-
-  // ========= DOWNLOAD CURRENT IMAGE =========
 
   function downloadCurrentFrame() {
     if (!mandelCanvas) return;
@@ -459,8 +549,6 @@
     document.body.removeChild(link);
   }
 
-  // ========= DOM INIT / CONTROLS =========
-
   function setupControls() {
     if (!mandelPanel || !mandelCanvas) return;
 
@@ -468,16 +556,16 @@
     if (!headerRow) return;
 
     const closeBtn = document.getElementById("mandelClose");
+    const accent = getUIAccent();
 
-    // NEXT STEP
     let nextBtn = document.getElementById("mandelNext");
     if (!nextBtn) {
       nextBtn = document.createElement("button");
       nextBtn.id          = "mandelNext";
       nextBtn.textContent = "NEXT STEP";
       nextBtn.style.background  = "#111";
-      nextBtn.style.color       = "#0ff";
-      nextBtn.style.border      = "1px solid #0ff";
+      nextBtn.style.color       = accent;
+      nextBtn.style.border      = `1px solid ${accent}`;
       nextBtn.style.fontFamily  = "monospace";
       nextBtn.style.fontSize    = "11px";
       nextBtn.style.padding     = "2px 8px";
@@ -496,15 +584,14 @@
       headerRow.appendChild(nextBtn);
     }
 
-    // DOWNLOAD button (between NEXT STEP and PLAY)
     let downloadBtn = document.getElementById("mandelDownload");
     if (!downloadBtn) {
       downloadBtn = document.createElement("button");
       downloadBtn.id          = "mandelDownload";
       downloadBtn.textContent = "DOWNLOAD";
       downloadBtn.style.background  = "#111";
-      downloadBtn.style.color       = "#0ff";
-      downloadBtn.style.border      = "1px solid #0ff";
+      downloadBtn.style.color       = accent;
+      downloadBtn.style.border      = `1px solid ${accent}`;
       downloadBtn.style.fontFamily  = "monospace";
       downloadBtn.style.fontSize    = "11px";
       downloadBtn.style.padding     = "2px 8px";
@@ -516,15 +603,14 @@
       headerRow.appendChild(downloadBtn);
     }
 
-    // PLAY / PAUSE
     let playBtn = document.getElementById("mandelPlay");
     if (!playBtn) {
       playBtn = document.createElement("button");
       playBtn.id          = "mandelPlay";
       playBtn.textContent = "PLAY";
       playBtn.style.background  = "#111";
-      playBtn.style.color       = "#0ff";
-      playBtn.style.border      = "1px solid #0ff";
+      playBtn.style.color       = accent;
+      playBtn.style.border      = `1px solid ${accent}`;
       playBtn.style.fontFamily  = "monospace";
       playBtn.style.fontSize    = "11px";
       playBtn.style.padding     = "2px 8px";
@@ -536,18 +622,14 @@
       headerRow.appendChild(playBtn);
     }
 
-    // Ensure button order: NEXT, DOWNLOAD, PLAY, CLOSE
     [nextBtn, downloadBtn, playBtn, closeBtn].forEach(btn => {
-      if (btn && btn.parentNode === headerRow) {
-        headerRow.removeChild(btn);
-      }
+      if (btn && btn.parentNode === headerRow) headerRow.removeChild(btn);
     });
     if (nextBtn)     headerRow.appendChild(nextBtn);
     if (downloadBtn) headerRow.appendChild(downloadBtn);
     if (playBtn)     headerRow.appendChild(playBtn);
     if (closeBtn)    headerRow.appendChild(closeBtn);
 
-    // Info line
     if (!document.getElementById("mandelInfo")) {
       const info = document.createElement("div");
       info.id = "mandelInfo";
@@ -556,10 +638,12 @@
       info.style.marginBottom = "2px";
       info.style.fontFamily   = "monospace";
       info.style.fontSize     = "11px";
-      info.style.color        = "#0ff";
+      info.style.color        = accent; // ✅ now follows picker
 
       mandelPanel.insertBefore(info, mandelCanvas);
     }
+
+    restyleMandelUI();
   }
 
   function resetView() {
@@ -602,13 +686,12 @@
     return true;
   }
 
-  // ========= GLOBAL ENTRYPOINT =========
-
   window.showMandelPanel = function () {
     if (!initMandelDom()) return;
 
     mandelPanel.style.display = "block";
     resetView();
+    restyleMandelUI();
   };
 
   console.log("[meq-mandel] Mandelbrot viewer ready (strict per-segment zoom + snapback + download).");
