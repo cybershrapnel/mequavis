@@ -731,6 +731,11 @@ const nodeColors = {
   13:"#8888ff"
 };
 
+// ✅ ADD THIS RIGHT UNDER nodeColors
+function mainCanvasTextColor() {
+  return window._meqFractalAnti ? "#000000" : "#ffffff";
+}
+
 const outerOrder = [12,1,2,11,10,3,4,9,5,8,7,6];
 const innerPairs = [
   [12,1],[2,11],[10,3],[4,9],[5,8],[6,7]
@@ -873,7 +878,8 @@ function drawNofur(baseX, baseY, label, rotation = 0, scale = 1, spinInner = tru
 
   ctx.restore();
 
-  ctx.fillStyle = "white";
+  //ctx.fillStyle = "white";
+ctx.fillStyle = mainCanvasTextColor();  // ✅ was "white"
   ctx.font = "16px monospace";
   ctx.textAlign = "center";
   if (!isLeft && !isRight && (label === "ALPHA" || label === "BETA")) {
@@ -1028,7 +1034,8 @@ nofurs.push({
 
     // Tag overlays (A1/B1/O1/... etc.)
     if(isSmall){
-      ctx.fillStyle="white";
+      //ctx.fillStyle="white";
+  ctx.fillStyle = mainCanvasTextColor(); // ✅ was "white"
       ctx.font="16px monospace";
       ctx.textAlign="center";
       ctx.textBaseline="middle";
