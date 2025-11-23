@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MEQUAVIS UI</title>
-
 <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
 <script type="importmap">
 {
@@ -14,196 +13,15 @@
   }
 }
 </script>
-
 <script src="https://cdn.tailwindcss.com"></script>
-<style>
-  body { background:black; color:white; font-family:monospace; overflow:hidden; }
-/* Base canvas styling */
-canvas {
-  display: block;
-  margin: auto;
-}
-
-/* Only the main Mequavis canvas is fixed and centered */
-#mequavis {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform-origin: center center;
-}
-
-/* === Global MEQUAVIS Scrollbar Theme === */
-
-/* Colors */
-:root {
-  --scroll-track: #050505;       /* dark panel background */
-  --scroll-thumb: #0ff;          /* cyan like borders/buttons */
-  --scroll-thumb-hover: #9ff;    /* lighter cyan on hover */
-}
-
-/* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
-}
-
-/* WebKit (Chrome, Edge, etc.) */
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-*::-webkit-scrollbar-track {
-  background: var(--scroll-track);
-}
-
-*::-webkit-scrollbar-thumb {
-  background: var(--scroll-thumb);
-  border-radius: 4px;
-  border: 1px solid #033;          /* subtle deep blue border */
-  box-shadow: 0 0 4px #033 inset;  /* slight inner glow */
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--scroll-thumb-hover);
-}
-
-  #layoutBtn {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 999;
-    background: #111;
-    color: #0ff;
-    border: 2px solid #0ff;
-    padding: 6px 14px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-family: monospace;
-  }
-#segmentLog {
-  position: fixed;
-  left: 10px;
-  top: 60px;
-  width: 260px;
-  height: calc(100vh - 70px);
-  background: #050505;
-  border: 1px solid #0ff;
-  padding: 8px;
-  font-family: monospace;
-  font-size: 11px;
-  color: #0ff;
-  overflow-y: auto;
-  z-index: 998;
-}
-
-#segmentLog h2 {
-  font-size: 12px;
-  margin-bottom: 4px;
-  color: #0ff;
-}
-#segmentLog .entry {
-  border-bottom: 1px solid #222;
-  padding: 2px 0;
-}
-#rightPanel {
-  position: fixed;
-  right: 10px;
-  top: 60px;
-  width: 260px;
-  height: calc(100vh - 70px);
-  background: #050505;
-  border: 1px solid #0ff;
-  padding: 8px;
-  font-family: monospace;
-  font-size: 11px;
-  color: #0ff;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  z-index: 998;
-}
-
-/* Top section: big buttons */
-#rightTop {
-  flex: 0 0 30%;
-}
-
-.action-btn {
-  width: 100%;
-  margin-bottom: 6px;
-  padding: 10px 4px;
-  border: 1px solid #0ff;
-  background: #111;
-  color: #0ff;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: bold;
-  text-align: center;
-}
-.action-btn:hover {
-  background: #033;
-}
-
-/* Middle section: AI output */
-#rightMiddle {
-  flex: 1 1 auto;
-  border: 1px solid #222;
-  padding: 4px;
-  overflow-y: auto;
-  background: #000;
-}
-
-#aiOutput .msg {
-  margin-bottom: 4px;
-}
-#aiOutput .sender {
-  color: #0f0;
-  font-weight: bold;
-}
-
-/* Bottom section: input + send */
-#rightBottom {
-  flex: 0 0 auto;
-  border-top: 1px solid #222;
-  padding-top: 4px;
-}
-
-#aiInput {
-  width: 100%;
-  box-sizing: border-box;
-  background: #000;
-  border: 1px solid #0ff;
-  color: #0ff;
-  font-family: monospace;
-  font-size: 11px;
-  padding: 4px;
-  resize: none;
-  height: 50px;
-}
-
-#aiSend {
-  margin-top: 4px;
-  width: 100%;
-  padding: 6px 4px;
-  background: #0ff;
-  color: #000;
-  border: none;
-  border-radius: 4px;
-  font-weight: bold;
-  cursor: pointer;
-}
-#aiSend:hover {
-  background: #9ff;
-}
-</style>
+<!-- ✅ CSS MOVED OUT -->
+<link rel="stylesheet" href="meq-ui.css">
 </head>
 <body>
 <button id="layoutBtn">Layout</button>
-
 <!-- RIGHT CONTROL / CHAT PANEL -->
 <div id="rightPanel">
+  <!-- Top: big action buttons -->
   <div id="rightTop">
     <button class="action-btn" data-action="mandelbrot-zoom">View Mandelbrot Zoom Location</button>
     <button class="action-btn" data-action="watch-tv">WATCH AI CABLETV</button>
@@ -212,11 +30,11 @@ canvas {
     <button class="action-btn" data-action="other-mode">OTHER MODE</button>
     <button class="action-btn" data-action="full-chat">FULL CHAT MODE</button>
   </div>
-
+  <!-- Middle: AI output / chat log -->
   <div id="rightMiddle">
     <div id="aiOutput"></div>
   </div>
-
+  <!-- Bottom: input box + send -->
   <div id="rightBottom">
     <div id="modelRow" style="margin-bottom:4px;font-size:11px;">
       <label>
@@ -235,10 +53,8 @@ canvas {
     <button id="aiSend">SEND</button>
   </div>
 </div>
-
 <!-- Segment log panel -->
 <div id="segmentLog"></div>
-
 <!-- MANDELBROT PANEL (hidden by default) -->
 <div id="mandelPanel" style="display:none; ...">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; margin-left:100px;">
@@ -265,12 +81,8 @@ canvas {
   <canvas id="mandelCanvas" width="800" height="800"
           style="width:70%; height:800px; background:#000;"></canvas>
 </div>
-
 <canvas id="mequavis" width="1600" height="900"></canvas>
-
-<!-- ✅ CANVAS / PANEL JS MOVED OUT -->
 <script src="meq-canvas.js"></script>
-
 <script src="meq-fractal-zone.js"></script>
 <script src="meq-mandel.js"></script>
 <script src="meq-eyeball.js"></script>
@@ -288,7 +100,6 @@ canvas {
 <script src="meq-ads.js"></script>
 <script src="meq-tone-engine.js"></script>
 <script type="module" src="meq-eve-mouth.js"></script>
-
 <script>
   window.MathJax = {
     tex: {
@@ -299,11 +110,9 @@ canvas {
 <script id="MathJax-script" async
         src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
 </script>
-
 <script type="module" src="meq-eve-overlay.js"></script>
 <script>
-  window.EVE_SCALE = 130;   // try 40, 80, 150, 300
+  window.EVE_SCALE = 130;
 </script>
-
 </body>
 </html>
