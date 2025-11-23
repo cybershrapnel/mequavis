@@ -278,22 +278,29 @@
   // SLASH COMMAND HANDLER + MeqChat.send PATCH
   // ---------------------------------------------------------------------------
 
-  async function handleSlashCommand(fullText) {
-  const trimmed = (fullText || "").trim();
-  if (!trimmed.startsWith("/")) return null;
-
-  const withoutSlash = trimmed.slice(1);
-  const parts = withoutSlash.split(/\s+/);
-  const cmd = (parts[0] || "").toLowerCase();
-  const argsText = parts.slice(1).join(" ");
-
-  // 🔹 NEW: pull the active session from MeqChat if available
-  let sessionId = null;
-  if (window.MeqChat && typeof window.MeqChat.getCurrentSessionId === "function") {
-    sessionId = window.MeqChat.getCurrentSessionId();
+  // NEW helper: push text into Eve talk memory
+  function injectIntoEveTalk(text) {
+    try {
+      if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
+        window.meqEveOverlay.setSpeechText(text);
+      } else {
+        window.EVE_SPEECH_TEXT = String(text || "");
+      }
+    } catch (e) {
+      console.warn("Failed to inject into Eve talk:", e);
+    }
   }
 
-      let reply = "";
+  async function handleSlashCommand(fullText) {
+    const trimmed = (fullText || "").trim();
+    if (!trimmed.startsWith("/")) return null;
+
+    const withoutSlash = trimmed.slice(1);
+    const parts = withoutSlash.split(/\s+/);
+    const cmd = (parts[0] || "").toLowerCase();
+    const argsText = parts.slice(1).join(" ");
+
+    let reply = "";
     let meta  = null;
 
     try {
@@ -341,10 +348,13 @@
       window.appendAIMessage(senderLabel, reply);
     }
 
+    // ✅ NEW: if this was /eve, also inject into Eve talk memory
+    if (cmd === "eve") {
+      injectIntoEveTalk(reply);
+    }
+
     return reply;
-
-}
-
+  }
 
   function patchMeqChatSend() {
     if (!window.MeqChat || typeof window.MeqChat.send !== "function") {
