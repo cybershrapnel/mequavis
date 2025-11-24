@@ -1,16 +1,16 @@
-/* meq-galaxy-maker.js (v16)
+/* meq-galaxy-maker.js (v15)
    Drop this AFTER your UI loads.
 
-   v16:
-   ✅ __meq_appendix now includes uuid, createdAt, title, filename, galaxyType.
-      - title/filename update to the user's upload title, or a default
-        "Galactic Sector <number>" -> filename "Galactic-Sector-<number>.txt"
-   ✅ Open skybox without toggling if skyboxPanel is already visible.
-   ✅ Close galaxy maker popup after successful upload + after opening skybox iframe.
-   ✅ Load Skybox uploads catalog, shows progress, and opens returned skyboxUrl IN skybox iframe panel.
+   v15:
+   ✅ Load Skybox now uploads catalog, shows progress, and opens returned skyboxUrl IN the skybox iframe panel.
    ✅ Add "Download all as zip" button beside Load Skybox.
    ✅ Zip includes JSON, catalog txt, original galaxy, final zoom, selected crop,
       and final boxed image with green rectangle.
+
+   PATCH v15a (your 3 fixes):
+   ✅ Add uuid + createdAt + user title into catalog.__meq_appendix
+   ✅ If skybox panel already visible after upload, DON'T click toggle (avoid hiding)
+   ✅ Close galaxy maker panel after successful upload + iframe open
 */
 
 (() => {
@@ -21,6 +21,15 @@
   const randi = (a, b) => Math.floor(rand(a, b + 1));
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const lerp  = (a, b, t) => a + (b - a) * t;
+
+  // ✅ uuid helper (does NOT touch filenames)
+  function uuidv4() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15);
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
 
   function gauss(mean=0, std=1) {
     let u = 0, v = 0;
@@ -149,18 +158,6 @@
     }, 0);
   }
 
-  function makeUUID() {
-    try {
-      if (crypto?.randomUUID) return crypto.randomUUID();
-    } catch {}
-    // fallback
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-      const r = Math.random() * 16 | 0;
-      const v = c === "x" ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
-  }
-
   // -----------------------------
   // Skybox panel opener (uses your meq-skybox panel)
   // -----------------------------
@@ -180,16 +177,13 @@
     return null;
   }
 
-  function isSkyboxPanelOpen(panel) {
-    if (!panel) return false;
-    const disp = (panel.style.display || "").toLowerCase();
-    if (disp && disp !== "none") return true;
-    try {
-      const cs = getComputedStyle(panel);
-      return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
-    } catch {
-      return false;
-    }
+  // ✅ robust visibility check so we don't hide skybox by clicking toggle
+  function isVisible(el) {
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") return false;
+    if (el.offsetParent === null && cs.position !== "fixed") return false;
+    return true;
   }
 
   function openSkyboxInPanel(url) {
@@ -197,29 +191,18 @@
     const iframe = document.getElementById("skyboxFrame");
     const toggleBtn = findSkyboxToggleButton();
 
-    const panelOpen = isSkyboxPanelOpen(panel);
-
-    if (panel) {
-      if (!panelOpen) {
-        // Prefer clicking the toggle button so its label stays in sync
-        if (toggleBtn) {
-          try { toggleBtn.click(); } catch(e) {}
-        } else {
-          panel.style.display = "flex";
-        }
-      }
-      // if already open, DO NOT click toggle
-    } else {
-      // last resort if panel not found but toggle exists
+    // ✅ ONLY click toggle if panel is NOT already visible
+    if (panel && !isVisible(panel)) {
       if (toggleBtn) {
         try { toggleBtn.click(); } catch(e) {}
+      } else {
+        panel.style.display = "block";
       }
     }
 
     if (iframe) {
       iframe.src = url;
     } else {
-      // last resort: same-tab navigation
       window.location.href = url;
     }
   }
@@ -303,23 +286,9 @@
   let lastSectorJSON = null;
   let lastStarCatalogText = null;
 
-  // Last sector metadata for appendix / uploads
-  let lastSectorMeta = null;
-
-  function initSectorMeta(seedTitle = null) {
-    const createdAt = new Date().toISOString();
-    const uuid = makeUUID();
-    const seed = seedTitle || `Galactic Sector ${Date.now()}`;
-    const title = seed;
-    const filename = safeFileStem(seed) + ".txt";
-    return {
-      uuid,
-      createdAt,
-      title,
-      filename,
-      galaxyType: currentGalaxyName
-    };
-  }
+  // ✅ appendix meta (NO side effects on filenames)
+  let currentUUID = null;        // stable for this galaxy session
+  let appendixTitle = null;      // set at upload time (user-entered)
 
   function ensurePopup() {
     if (popup) return popup;
@@ -500,7 +469,7 @@
 
     // make it special + green + push to far right
     btnLoadSkybox.classList.add("skybox-special");
-    btnLoadSkybox.style.marginLeft = "auto";                 // shove to right in flex row
+    btnLoadSkybox.style.marginLeft = "auto";
     btnLoadSkybox.style.borderColor = "#00ff00";
     btnLoadSkybox.style.color = "#00ff00";
     btnLoadSkybox.style.background = "#061a06";
@@ -517,7 +486,6 @@
     consoleToolbar.appendChild(btnDLBoxed);
 
     consoleToolbar.appendChild(btnZipAll);
-
     consoleToolbar.appendChild(btnLoadSkybox);
 
     consolePre = document.createElement("pre");
@@ -599,11 +567,7 @@
       const jsonObj = buildSectorJSON(finalStars, selectionCanvasRect);
       lastSectorJSON = jsonObj;
 
-      // init meta once per build
-      if (!lastSectorMeta) lastSectorMeta = initSectorMeta();
-      lastSectorMeta.galaxyType = jsonObj.galaxyType || currentGalaxyName;
-
-      lastStarCatalogText = buildStarCatalogTXT(jsonObj, lastSectorMeta);
+      lastStarCatalogText = buildStarCatalogTXT(jsonObj);
 
       showConsole(jsonObj, lastStarCatalogText);
       return;
@@ -658,7 +622,7 @@
       stars: currentStars,
       starsPerDot,
       ultraFinal
-      });
+    });
 
     zoomLevel++;
     ultraFinal = false;
@@ -679,7 +643,6 @@
     canvas.style.display = "none";
     footer.style.display = "none";
 
-    // background prefers cropped selection
     if (finalSelectedCropURL) {
       popup.style.backgroundImage = `url(${finalSelectedCropURL})`;
     } else if (finalBoxedImageURL) {
@@ -722,12 +685,10 @@
     if (btnDLBoxed) btnDLBoxed.onclick = () =>
       downloadDataURL(finalSelectedCropURL || finalZoomImageURL, "final-zoom-selected.png");
 
-    // ✅ Load Skybox upload flow
     if (btnLoadSkybox) {
       btnLoadSkybox.onclick = () => beginSkyboxUploadFlow(jsonObj, catalogTxt);
     }
 
-    // ✅ ZIP download
     if (btnZipAll) {
       btnZipAll.onclick = () => downloadAllAsZip(jsonObj, catalogTxt);
     }
@@ -736,9 +697,8 @@
   function beginSkyboxUploadFlow(jsonObj, catalogTxt) {
     const accent = getAccent();
 
-    // Replace consolePre with form UI
     consolePre.style.display = "block";
-    consolePre.innerHTML = ""; // clear
+    consolePre.innerHTML = "";
 
     const wrap = document.createElement("div");
     wrap.style.cssText = `
@@ -816,31 +776,22 @@
     consolePre.appendChild(wrap);
 
     proceed.onclick = () => {
-      const rawInputTitle = ta.value.trim();
-
-      // If user didn't name it, auto-seed a numbered title so filename becomes Galactic-Sector-<number>.txt
-      const title = rawInputTitle || `Galactic Sector ${Date.now()}`;
-      const stem = safeFileStem(title);
-      const filename = stem + ".txt";
-
-      // ensure meta exists, then update title/filename/galaxyType
-      if (!lastSectorMeta) lastSectorMeta = initSectorMeta(title);
-      lastSectorMeta.title = title;
-      lastSectorMeta.filename = filename;
-      lastSectorMeta.galaxyType = jsonObj.galaxyType || currentGalaxyName;
-
-      // rebuild catalog with correct appendix BEFORE upload
-      const updatedCatalogTxt = buildStarCatalogTXT(jsonObj, lastSectorMeta);
-      lastStarCatalogText = updatedCatalogTxt;
-
+      const title = ta.value.trim() || "Galactic Sector";
       status.textContent = "Uploading starcatalog.txt...";
       proceed.disabled = true;
 
-      const blob = new Blob([updatedCatalogTxt || ""], { type: "text/plain;charset=utf-8" });
+      // ✅ store title for appendix and rebuild catalog text with it
+      appendixTitle = title;
+      if (!currentUUID) currentUUID = uuidv4();
+      const rebuiltCatalogTxt = buildStarCatalogTXT(jsonObj);
+      lastStarCatalogText = rebuiltCatalogTxt;
+
+      const stem = safeFileStem(title);
+      const blob = new Blob([rebuiltCatalogTxt || ""], { type: "text/plain;charset=utf-8" });
 
       const fd = new FormData();
       fd.append("title", title);
-      fd.append("file", blob, filename);
+      fd.append("file", blob, stem + ".txt");
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", STARMAP_UPLOAD_URL, true);
@@ -864,12 +815,11 @@
           bar.style.width = "100%";
           status.textContent = "Uploaded. Opening Skybox...";
 
-          // wait a couple seconds as requested
           setTimeout(() => {
             openSkyboxInPanel(resp.skyboxUrl);
             status.textContent = "Skybox opened in panel.";
 
-            // ✅ close galaxy maker after opening iframe
+            // ✅ close galaxy maker after success + iframe open
             togglePopup(false);
           }, 2000);
 
@@ -898,11 +848,9 @@
       const JSZip = await ensureJSZip();
       const zip = new JSZip();
 
-      // Add JSON and catalog
       zip.file("galactic-sector.json", JSON.stringify(jsonObj, null, 2));
       zip.file("starcatalog.txt", catalogTxt || "");
 
-      // Images (data URLs)
       if (rootImageURL) {
         zip.file("original-galaxy.png", dataURLToBlob(rootImageURL));
       }
@@ -929,7 +877,6 @@
         if (btnZipAll) btnZipAll.textContent = oldLabel || "Download all as zip";
       }, 1500);
 
-      // Also print to consolePre for visibility
       if (consolePre && consolePre.style.display === "block") {
         const msg = document.createElement("div");
         msg.style.color = accent;
@@ -1015,16 +962,13 @@
       updateCountFooter();
       redrawWithSelection();
 
-      // ultra-final: capture BOTH boxed and cropped
       if (ultraFinal && selectionCanvasRect && selectionCanvasRect.w > 6 && selectionCanvasRect.h > 6) {
         const W = canvas.width;
         const H = canvas.height;
         const r = selectionCanvasRect;
 
-        // boxed (current canvas includes green border)
         finalBoxedImageURL = canvas.toDataURL("image/png");
 
-        // cropped from base view WITHOUT border
         if (lastViewImage) {
           const tmp = document.createElement("canvas");
           tmp.width = W;
@@ -1183,17 +1127,16 @@
     };
   }
 
-  function buildStarCatalogTXT(sectorJSON, metaOverride=null) {
+  function buildStarCatalogTXT(sectorJSON) {
     const rand = (a, b) => a + Math.random() * (b - a);
     const randInt = (a, b) => Math.floor(rand(a, b + 1));
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
     const R_SUN_LY = 7.35355e-8;
-    const AU_LY = 1.58125e-5;          // 1 AU in lightyears (matches your working data)
+    const AU_LY = 1.58125e-5;
     const EARTH_MASS_KG = 5.9722e24;
-    const EARTH_RADIUS_LY = 6.734e-10; // Earth radius in ly (matches your working data)
+    const EARTH_RADIUS_LY = 6.734e-10;
 
-    // We shrink radii to keep corona sane.
     const CORONA_SHRINK = 5;
 
     function mkValue(source, unit, quantity, measurementQualifier) {
@@ -1273,33 +1216,27 @@
       };
     }
 
-    // ---- Planet generation ----
-
     function makePlanetsForStar(starObj, starId, startPlanetId) {
       const planets = [];
-      const numPlanets = randInt(1, 6); // at least 1
+      const numPlanets = randInt(1, 6);
 
       const letters = ["b","c","d","e","f","g","h","i"];
-      let nextA_AU = rand(0.05, 0.6); // starting semi-major axis in AU
+      let nextA_AU = rand(0.05, 0.6);
 
       for (let i = 0; i < numPlanets; i++) {
         const letter = letters[i] || `p${i+1}`;
 
-        // Increase orbital distance each planet
         nextA_AU *= rand(1.4, 2.2);
 
-        // Clamp somewhere reasonable
         const aAU = Math.min(nextA_AU, 60);
         const aLy = aAU * AU_LY;
 
-        // Kepler-ish period (years -> days). P^2 = a^3
         const periodYears = Math.sqrt(aAU * aAU * aAU);
         const periodDays = periodYears * 365.256363;
 
         const e = rand(0, 0.35);
         const bLy = aLy * Math.sqrt(1 - e*e);
 
-        // Pick a rough planet type bucket
         const typeBucket = pick(["rocky", "ice", "gas"]);
         let earthMasses, earthRadii, density;
         if (typeBucket === "rocky") {
@@ -1348,8 +1285,6 @@
       return planets;
     }
 
-    // ---- Build catalog ----
-
     const grid = sectorJSON.grid || { width: 100, height: 100, depth: 100 };
     const inputStars = Array.isArray(sectorJSON.stars) ? sectorJSON.stars : [];
 
@@ -1384,9 +1319,8 @@
     let planetsOut = [];
 
     let nextStarId = 2;
-    let nextPlanetId = 100000; // large offset to avoid collisions with star IDs
+    let nextPlanetId = 100000;
 
-    // Add planets for Sol too (keeps exoplanet highlight logic happy)
     planetsOut.push(...makePlanetsForStar(solStar, 1, nextPlanetId));
     nextPlanetId += planetsOut.length;
 
@@ -1405,20 +1339,20 @@
     const catalog = { stars: starsOut, planets: planetsOut };
 
     // ==========================================================
-    // MEQ APPENDIX (added at end, safe to ignore by loader)
+    // MEQ APPENDIX (safe to ignore by loader)
     // Stores:
+    //  - uuid, createdAt, title (user-entered)
     //  - original sector JSON
-    //  - 4 base64 image dataURLs (if present)
-    //  - build + filename identity to prevent wrong-save loads
+    //  - 4 base64 image dataURLs
     // ==========================================================
-    const meta = metaOverride || lastSectorMeta || initSectorMeta();
+    if (!currentUUID) currentUUID = uuidv4(); // stable per galaxy session
+
     catalog.__meq_appendix = {
-      uuid: meta.uuid,
-      createdAt: meta.createdAt,
-      title: meta.title,
-      filename: meta.filename,
-      galaxyType: meta.galaxyType || sectorJSON.galaxyType || currentGalaxyName,
-      sectorJSON: sectorJSON, // your original galactic-sector.json
+      uuid: currentUUID,
+      createdAt: new Date().toISOString(),
+      title: appendixTitle || null,
+
+      sectorJSON: sectorJSON,
       images: {
         originalGalaxy: rootImageURL || null,
         finalZoom: finalZoomImageURL || null,
@@ -1621,6 +1555,10 @@
     clearSelection(false);
     updateFooterMode();
 
+    // ✅ new galaxy session => new uuid, clear title
+    currentUUID = uuidv4();
+    appendixTitle = null;
+
     const W = canvas.width;
     const H = canvas.height;
     const cx = W / 2;
@@ -1646,7 +1584,6 @@
 
     lastSectorJSON = null;
     lastStarCatalogText = null;
-    lastSectorMeta = null;
 
     ftType.textContent = `Galaxy Type: ${currentGalaxyName}`;
     updateCountFooter();
@@ -1964,7 +1901,7 @@
     if (!btn) return;
 
     ensurePopup();
-    injectMeqScrollbarTheme(); // ✅ add this line
+    injectMeqScrollbarTheme();
 
     btn.addEventListener("click", () => {
       if (!isOpen) togglePopup(true);
@@ -1987,7 +1924,7 @@
   // MEQ Scrollbar Theme Injector
   // -----------------------------
   function injectMeqScrollbarTheme() {
-    if (document.getElementById("meqScrollbarTheme")) return; // idempotent
+    if (document.getElementById("meqScrollbarTheme")) return;
 
     const style = document.createElement("style");
     style.id = "meqScrollbarTheme";
