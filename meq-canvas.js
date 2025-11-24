@@ -988,7 +988,6 @@ function drawTitle() {
   // ✅ only show Earth at the root title:
   // Zone 1 • Gasket 1 • Segment 1 • Layer 1 • Omniverse 0
   window._meqOmegaShowEarth =
-    zoneNum === 1 &&
     gasket === 1 &&
     gasketPower === 1 &&
     segment === 1 &&
