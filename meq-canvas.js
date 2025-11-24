@@ -240,6 +240,63 @@ const W = canvas.width, H = canvas.height;
 const BASE_W = W;
 const BASE_H = H;
 
+// --- Omega overlay sources ---
+const EARTH_GIF_SRC = "earth.gif";
+const MOON_GIF_SRC  = "moon.gif";
+
+// --- Animated Earth/Moon overlay for OMEGA (DOM, not canvas) ---
+let omegaEarthEl = null;
+
+function ensureOmegaEarthOverlay() {
+  if (omegaEarthEl) return omegaEarthEl;
+
+  omegaEarthEl = document.createElement("img");
+  omegaEarthEl.id = "omegaEarthOverlay";
+  omegaEarthEl.src = EARTH_GIF_SRC; // default
+  omegaEarthEl.dataset.src = EARTH_GIF_SRC;
+  omegaEarthEl.style.position = "fixed"; // fixed works well with transformed canvas
+  omegaEarthEl.style.left = "0px";
+  omegaEarthEl.style.top = "0px";
+  omegaEarthEl.style.width = "0px";
+  omegaEarthEl.style.height = "0px";
+  omegaEarthEl.style.transform = "translate(-50%, -50%)";
+  omegaEarthEl.style.pointerEvents = "none";
+  omegaEarthEl.style.zIndex = "9999"; // on top of canvas
+
+  document.body.appendChild(omegaEarthEl);
+  return omegaEarthEl;
+}
+
+function updateOmegaEarthOverlay(cx, cy, earthSzCanvas, visible, srcOverride = null) {
+  const el = ensureOmegaEarthOverlay();
+  if (!visible) {
+    el.style.display = "none";
+    return;
+  }
+
+  // swap gif if requested
+  if (srcOverride && el.dataset.src !== srcOverride) {
+    el.src = srcOverride;
+    el.dataset.src = srcOverride;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width / canvas.width;
+  const scaleY = rect.height / canvas.height;
+
+  const screenX = rect.left + cx * scaleX;
+  const screenY = rect.top  + cy * scaleY;
+
+  const earthSzPx = earthSzCanvas * scaleX; // use X scale (uniform anyway)
+
+  el.style.display = "block";
+  el.style.left = `${screenX}px`;
+  el.style.top  = `${screenY}px`;
+  el.style.width  = `${earthSzPx}px`;
+  el.style.height = `${earthSzPx}px`;
+}
+
+
 // 🔹 Big wheel spin toggle (default ON)
 window._meqBigWheelSpinEnabled = true;
 
@@ -524,6 +581,14 @@ const nodeColors = {
 function mainCanvasTextColor() {
   return window._meqFractalAnti ? "#000000" : "#ffffff";
 }
+
+// --- lock / earth overlay images (loaded once) ---
+const lockIconImg = new Image();
+lockIconImg.src = "lockicon.png";   // <-- change path if needed
+
+const earthGifImg = new Image();
+earthGifImg.src = "earth.gif";      // <-- still here just in case
+
 
 const outerOrder = [12,1,2,11,10,3,4,9,5,8,7,6];
 const innerPairs = [
@@ -820,6 +885,69 @@ function drawOmniverse(baseX,baseY,rot,scale=1,isSmall=false,isLeft=false,isRigh
   }
 }
 
+function drawLockOverlays() {
+  // hide by default each frame; we re-show if omega is locked
+  updateOmegaEarthOverlay(0, 0, 0, false);
+
+  const ls = window.nofurLockState || {};
+  if (!ls) return;
+
+  for (const nf of nofurs) {
+    if (!nf || !nf.center) continue;
+
+    // big nofurs only
+    if (nf.flag === "left" || nf.flag === "right") continue;
+
+    const label = nf.label;
+    if (
+      label !== "ALPHA" &&
+      label !== "BETA" &&
+      label !== "GAMMA" &&
+      label !== "DELTA" &&
+      label !== "OMEGA"
+    ) continue;
+
+    const st = ls[label];
+    if (!st || !st.locked) continue;
+
+    const cx = nf.center.x;
+    const cy = nf.center.y;
+
+    const scale = (nf.outerRadius || 100) / 100; // outerRadius=100*scale
+    const boxHalf = 110 * scale;                // (radiusOuter+10)*scale
+    const pad = 6 * scale;
+
+    if (label === "OMEGA") {
+      const earthSz = 70 * scale;
+
+      const showEarth = window._meqOmegaShowEarth === true;
+      const src = showEarth ? EARTH_GIF_SRC : MOON_GIF_SRC;
+
+      updateOmegaEarthOverlay(cx, cy, earthSz, true, src);
+      continue;
+    }
+
+    // Lock icon in corners
+    const iconSz = 18 * scale;
+
+    let ix, iy;
+    if (label === "ALPHA" || label === "DELTA") {
+      // bottom-left
+      ix = cx - boxHalf + pad;
+      iy = cy + boxHalf - iconSz - pad;
+    } else {
+      // bottom-right (BETA/GAMMA)
+      ix = cx + boxHalf - iconSz - pad;
+      iy = cy + boxHalf - iconSz - pad;
+    }
+
+    if (lockIconImg.naturalWidth > 0) {
+      ctx.drawImage(lockIconImg, ix, iy, iconSz, iconSz);
+    }
+  }
+}
+
+
 function drawTitle() {
   // ✅ follow UI picker for title line
   ctx.fillStyle = getCanvasAccent();
@@ -852,6 +980,16 @@ function drawTitle() {
   const zoneNum = (typeof window._meqFractalSection === "number")
     ? window._meqFractalSection
     : 1;
+
+  // ✅ only show Earth at the root title:
+  // Zone 1 • Gasket 1 • Segment 1 • Layer 1 • Omniverse 0
+  window._meqOmegaShowEarth =
+    zoneNum === 1 &&
+    gasket === 1 &&
+    gasketPower === 1 &&
+    segment === 1 &&
+    currentLayer === 1 &&
+    addressDisplay === "0";
 
   ctx.fillText(
     `Zone ${zoneNum} • ${gasketLabel} • Segment ${segment} • Layer ${currentLayer} • Omniverse ${addressDisplay}`,
@@ -1044,6 +1182,8 @@ function animate(){
     }
   }
 
+  // ✅ draw lock icons / earth/moon gif LAST so they're on top
+  drawLockOverlays();
   requestAnimationFrame(animate);
 }
 
