@@ -172,7 +172,12 @@
 
     // === Inner ring ===
     let innerCoords = [];
-    const innerRot = spinInner ? rotation : 0;
+    //const innerRot = spinInner ? rotation : 0;
+const innerRot = spinInner
+  ? ((isLeft || isRight) ? -rotation : rotation)
+  : 0;
+
+
     for (let i = 0; i < innerPairs.length; i++) {
       const aIndex = outerOrder.indexOf(innerPairs[i][0]);
       const bIndex = outerOrder.indexOf(innerPairs[i][1]);
