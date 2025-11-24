@@ -5,8 +5,7 @@
    - View Home button stays centered under canvas.
    - "Activate Wormhole" button sits to the LEFT of View Home (same row),
      and ONLY appears while Home mode is active.
-     Each time you ACTIVATE it, the inner ring flips direction and stays that way
-     until you deactivate it (no timed oscillation).
+     When ON, inner ring spins backwards continuously.
    - Overlay button sits to the RIGHT of View Home (same row),
      and ONLY appears while Home mode is active.
 */
@@ -54,9 +53,9 @@
   let overlayOpaque = false; // black background toggle
   let homeRot = 0;
 
-  // ✅ Wormhole state (continuous reverse while active; alternate per activation)
+  // ✅ Wormhole state (continuous reverse while active)
   let wormholeActive = false;
-  let wormholeDir = 1;  // +1 or -1; flips EACH time you activate wormhole
+  let wormholeDir = 1;  // +1 normal, -1 reverse
   let innerRot = 0;     // inner ring accumulator (so it doesn't snap)
 
   // Remember only what we actually change
@@ -167,15 +166,18 @@
         if (wormholeActive) {
           btnWormhole.textContent = "Deactivate Wormhole";
 
-          // ✅ alternate direction PER activation (no timed flip)
-          wormholeDir *= -1;
+          // ✅ ALWAYS reverse when active
+          wormholeDir = -1;
 
           // align inner to outer to avoid snap
           innerRot = homeRot;
         } else {
           btnWormhole.textContent = "Activate Wormhole";
 
-          // resync inner to outer when off
+          // ✅ normal when off
+          wormholeDir = 1;
+
+          // resync inner to outer
           innerRot = homeRot;
         }
       });
