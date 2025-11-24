@@ -3,11 +3,12 @@
 
    This version:
    - View Home button stays centered under canvas.
+   - "Activate Wormhole" button sits to the LEFT of View Home (same row),
+     and ONLY appears while Home mode is active.
+     Each time you ACTIVATE it, the inner ring flips direction and stays that way
+     until you deactivate it (no timed oscillation).
    - Overlay button sits to the RIGHT of View Home (same row),
      and ONLY appears while Home mode is active.
-   - Overlay button text toggles:
-       * "Overlay Mode"  (currently transparent; click -> black)
-       * "Transparent"   (currently black; click -> transparent)
 */
 
 (() => {
@@ -53,6 +54,11 @@
   let overlayOpaque = false; // black background toggle
   let homeRot = 0;
 
+  // ✅ Wormhole state (continuous reverse while active; alternate per activation)
+  let wormholeActive = false;
+  let wormholeDir = 1;  // +1 or -1; flips EACH time you activate wormhole
+  let innerRot = 0;     // inner ring accumulator (so it doesn't snap)
+
   // Remember only what we actually change
   let savedEyeState = null;
 
@@ -68,6 +74,7 @@
   // Buttons
   let btnHome = null;
   let btnOverlay = null;
+  let btnWormhole = null;
 
   function ensureOverlayCanvas() {
     if (overlayCanvas) return overlayCanvas;
@@ -144,6 +151,36 @@
   }
 
   function ensureButtons() {
+    // ✅ Wormhole button (LEFT of View Home) — only visible in home mode
+    if (!btnWormhole) {
+      btnWormhole = document.createElement("button");
+      btnWormhole.id = "wormholeBtn";
+      btnWormhole.textContent = "Activate Wormhole";
+      styleBasicButton(btnWormhole);
+      btnWormhole.style.display = "none"; // ONLY visible in home mode
+      btnWormhole.style.opacity = "0.9";
+      document.body.appendChild(btnWormhole);
+
+      btnWormhole.addEventListener("click", () => {
+        wormholeActive = !wormholeActive;
+
+        if (wormholeActive) {
+          btnWormhole.textContent = "Deactivate Wormhole";
+
+          // ✅ alternate direction PER activation (no timed flip)
+          wormholeDir *= -1;
+
+          // align inner to outer to avoid snap
+          innerRot = homeRot;
+        } else {
+          btnWormhole.textContent = "Activate Wormhole";
+
+          // resync inner to outer when off
+          innerRot = homeRot;
+        }
+      });
+    }
+
     if (!btnHome) {
       btnHome = document.createElement("button");
       btnHome.id = "viewHomeBtn";
@@ -162,16 +199,23 @@
 
         ensureOverlayCanvas();
         ensureGifOverlays();
-        ensureButtons(); // make sure overlay btn exists too
+        ensureButtons(); // make sure overlay + wormhole buttons exist
 
         overlayCanvas.style.display = homeActive ? "block" : "none";
         setGifVisible(homeActive);
 
         if (homeActive) {
-          // show overlay button only in home mode
+          // show overlay + wormhole buttons only in home mode
           btnOverlay.style.display = "block";
           btnOverlay.style.zIndex = String(Z_BTN_ACTIVE);
           btnOverlay.textContent = overlayOpaque ? "Transparent Mode" : "Disable Transparency";
+
+          btnWormhole.style.display = "block";
+          btnWormhole.style.zIndex = String(Z_BTN_ACTIVE);
+          btnWormhole.textContent = wormholeActive ? "Deactivate Wormhole" : "Activate Wormhole";
+
+          // align inner on entry
+          innerRot = homeRot;
 
           const eyeWasEnabled =
             (typeof window._meqEyeEnabled !== "undefined") &&
@@ -186,10 +230,14 @@
           window._meqEyeEnabled = false;
           window._meqEyeAutoTraverse = false;
         } else {
-          // hide overlay button when leaving home
+          // hide overlay + wormhole buttons when leaving home
           if (btnOverlay) {
             btnOverlay.style.display = "none";
             btnOverlay.style.zIndex = String(Z_BTN_NORMAL);
+          }
+          if (btnWormhole) {
+            btnWormhole.style.display = "none";
+            btnWormhole.style.zIndex = String(Z_BTN_NORMAL);
           }
 
           if (savedEyeState) {
@@ -216,10 +264,9 @@
         overlayOpaque = !overlayOpaque;
 
         if (overlayCanvas) {
-          overlayCanvas.style.background = overlayOpaque ? "#000" : "Disable Transparency";
+          overlayCanvas.style.background = overlayOpaque ? "#000" : "transparent";
         }
 
-        // text toggles per your request
         btnOverlay.textContent = overlayOpaque ? "Transparent Mode" : "Disable Transparency";
 
         btnOverlay.style.opacity = overlayOpaque ? "1.0" : "0.9";
@@ -231,7 +278,7 @@
     window.addEventListener("resize", positionButtonAndOverlay);
     window.addEventListener("scroll", positionButtonAndOverlay, true);
 
-    return { btnHome, btnOverlay };
+    return { btnHome, btnOverlay, btnWormhole };
   }
 
   function positionButtonAndOverlay() {
@@ -240,7 +287,7 @@
 
     const rect = mainCanvas.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
-    const topRow = rect.bottom - 40; // your ~100px-up row
+    const topRow = rect.bottom - 40;
 
     // View Home stays centered
     if (btnHome) {
@@ -248,11 +295,22 @@
       btnHome.style.top  = `${topRow}px`;
     }
 
-    // Overlay button goes to the RIGHT of View Home on same row, only if visible
+    // Wormhole button to LEFT of View Home, only if visible
+    if (btnWormhole && homeActive && btnWormhole.style.display !== "none") {
+      const gap = 12;
+      const homeRect = btnHome.getBoundingClientRect();
+      const wormRect = btnWormhole.getBoundingClientRect();
+
+      const wormCenterX = homeRect.left - gap - wormRect.width / 2;
+
+      btnWormhole.style.left = `${wormCenterX}px`;
+      btnWormhole.style.top  = `${topRow}px`;
+    }
+
+    // Overlay button to RIGHT of View Home, only if visible
     if (btnOverlay && homeActive && btnOverlay.style.display !== "none") {
       const gap = 12;
 
-      // measure after home button positioned
       const homeRect = btnHome.getBoundingClientRect();
       const overlayRect = btnOverlay.getBoundingClientRect();
 
@@ -317,10 +375,12 @@
     const radiusInner = radiusOuter * 0.50;
 
     const nodeSizeCanvas = minDim * 0.05;
-    const rot = homeRot;
+
+    const rotOuter = homeRot;
+    const rotInner = wormholeActive ? innerRot : homeRot;
 
     const outerCoords = OUTER_ORDER.map((num, i) => {
-      const angle = (i / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rot;
+      const angle = (i / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rotOuter;
       return {
         num,
         x: centerX + Math.cos(angle) * radiusOuter,
@@ -332,8 +392,8 @@
     const innerCoords = INNER_PAIRS.map((pair, i) => {
       const aIndex = OUTER_ORDER.indexOf(pair[0]);
       const bIndex = OUTER_ORDER.indexOf(pair[1]);
-      const angleA = (aIndex / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rot;
-      const angleB = (bIndex / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rot;
+      const angleA = (aIndex / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rotInner;
+      const angleB = (bIndex / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rotInner;
       const midAngle = (angleA + angleB) / 2;
 
       return {
@@ -370,7 +430,7 @@
       }
     });
 
-    // ⭐ inner 6-node star (two triangles)
+    // inner 6-node star (two triangles)
     for (let i = 0; i < innerCoords.length; i++) {
       for (let j = i + 1; j < innerCoords.length; j++) {
         const a = innerCoords[i];
@@ -465,8 +525,18 @@
       if (window._meqEyeAutoTraverse) window._meqEyeAutoTraverse = false;
 
       if (window._meqBigWheelSpinEnabled !== false) {
+        // outer always forward
         homeRot += BASE_SPIN_SPEED;
+
+        if (wormholeActive) {
+          // inner spins continuously in chosen direction
+          innerRot += BASE_SPIN_SPEED * wormholeDir;
+        } else {
+          // inner matches outer when wormhole off
+          innerRot = homeRot;
+        }
       }
+
       drawHomeWheel();
     } else {
       if (overlayCtx && overlayCanvas) {
