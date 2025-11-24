@@ -8,6 +8,15 @@
      When ON, inner ring spins backwards continuously.
    - Overlay button sits to the RIGHT of View Home (same row),
      and ONLY appears while Home mode is active.
+   - ✅ Bottom row (ONLY visible in home mode):
+       * "Reset Alignment"     -> aligns both rings + resets BOTH speeds + directions
+       * "Slow Outer Ring"     -> slows only outer ring
+       * "Slow Inner Ring"     -> slows only inner ring
+       * "Reverse Outer Ring"  -> toggles outer ring direction
+   - Wormhole coloring:
+       * When wormholeActive: Earth→Moon spokes are GREEN
+       * When wormholeActive: EXISTING Moon→Moon star lines become RED
+         (no new moon-to-moon lines are added)
 */
 
 (() => {
@@ -40,7 +49,10 @@
 
   const EARTH_SCALE = 2.0;
   const MOON_SCALE  = 1.0;
+
   const BASE_SPIN_SPEED = 0.01;
+  const MIN_SPIN_SPEED  = 0.001;  // don't let it go to 0
+  const SLOW_FACTOR     = 0.8;    // each click slows by 20%
 
   // z-index plan
   const Z_OVERLAY_CANVAS = 200;     // blocks clicks to underlying canvas
@@ -51,12 +63,19 @@
 
   let homeActive = false;
   let overlayOpaque = false; // black background toggle
-  let homeRot = 0;
 
-  // ✅ Wormhole state (continuous reverse while active)
+  // rotations
+  let homeRot = 0;   // outer ring accumulator
+  let innerRot = 0;  // inner ring accumulator (independent)
+
+  // speeds (mutable)
+  let outerSpeed = BASE_SPIN_SPEED;
+  let innerSpeed = BASE_SPIN_SPEED;
+
+  // directions
+  let outerDir = 1;  // +1 forward, -1 backward (button toggles this)
   let wormholeActive = false;
-  let wormholeDir = 1;  // +1 normal, -1 reverse
-  let innerRot = 0;     // inner ring accumulator (so it doesn't snap)
+  let wormholeDir = 1;  // +1 forward, -1 reverse for INNER while wormhole ON
 
   // Remember only what we actually change
   let savedEyeState = null;
@@ -74,6 +93,11 @@
   let btnHome = null;
   let btnOverlay = null;
   let btnWormhole = null;
+
+  let btnResetAlign = null;
+  let btnSlowOuter  = null;
+  let btnSlowInner  = null;
+  let btnReverseOuter = null;
 
   function ensureOverlayCanvas() {
     if (overlayCanvas) return overlayCanvas;
@@ -149,14 +173,35 @@
     b.style.whiteSpace = "nowrap";
   }
 
+  function showHomeControls(show) {
+    const disp = show ? "block" : "none";
+
+    if (btnOverlay)       btnOverlay.style.display = disp;
+    if (btnWormhole)      btnWormhole.style.display = disp;
+    if (btnResetAlign)    btnResetAlign.style.display = disp;
+    if (btnSlowOuter)     btnSlowOuter.style.display = disp;
+    if (btnSlowInner)     btnSlowInner.style.display = disp;
+    if (btnReverseOuter)  btnReverseOuter.style.display = disp;
+
+    const z = show ? Z_BTN_ACTIVE : Z_BTN_NORMAL;
+    [btnOverlay, btnWormhole, btnResetAlign, btnSlowOuter, btnSlowInner, btnReverseOuter].forEach(b => {
+      if (b) b.style.zIndex = String(z);
+    });
+  }
+
+  function updateReverseOuterLabel() {
+    if (!btnReverseOuter) return;
+    btnReverseOuter.textContent = (outerDir === 1) ? "Reverse Outer Ring" : "Forward Outer Ring";
+  }
+
   function ensureButtons() {
-    // ✅ Wormhole button (LEFT of View Home) — only visible in home mode
+    // Wormhole button (LEFT of View Home) — only visible in home mode
     if (!btnWormhole) {
       btnWormhole = document.createElement("button");
       btnWormhole.id = "wormholeBtn";
       btnWormhole.textContent = "Activate Wormhole";
       styleBasicButton(btnWormhole);
-      btnWormhole.style.display = "none"; // ONLY visible in home mode
+      btnWormhole.style.display = "none";
       btnWormhole.style.opacity = "0.9";
       document.body.appendChild(btnWormhole);
 
@@ -165,24 +210,88 @@
 
         if (wormholeActive) {
           btnWormhole.textContent = "Deactivate Wormhole";
-
-          // ✅ ALWAYS reverse when active
-          wormholeDir = -1;
-
-          // align inner to outer to avoid snap
-          innerRot = homeRot;
+          wormholeDir = -1; // reverse inner while active
         } else {
           btnWormhole.textContent = "Activate Wormhole";
-
-          // ✅ normal when off
-          wormholeDir = 1;
-
-          // resync inner to outer
-          innerRot = homeRot;
+          wormholeDir = 1;  // forward inner when off
         }
       });
     }
 
+    // Reset alignment + speed + directions
+    if (!btnResetAlign) {
+      btnResetAlign = document.createElement("button");
+      btnResetAlign.id = "resetAlignBtn";
+      btnResetAlign.textContent = "Reset Alignment";
+      styleBasicButton(btnResetAlign);
+      btnResetAlign.style.display = "none";
+      btnResetAlign.style.opacity = "0.9";
+      document.body.appendChild(btnResetAlign);
+
+      btnResetAlign.addEventListener("click", () => {
+        // align both rings + reset speeds + directions
+        homeRot = 0;
+        innerRot = 0;
+
+        outerSpeed = BASE_SPIN_SPEED;
+        innerSpeed = BASE_SPIN_SPEED;
+
+        outerDir = 1;
+        wormholeActive = false;
+        wormholeDir = 1;
+
+        if (btnWormhole) btnWormhole.textContent = "Activate Wormhole";
+        updateReverseOuterLabel();
+      });
+    }
+
+    // Slow outer
+    if (!btnSlowOuter) {
+      btnSlowOuter = document.createElement("button");
+      btnSlowOuter.id = "slowOuterBtn";
+      btnSlowOuter.textContent = "Slow Outer Ring";
+      styleBasicButton(btnSlowOuter);
+      btnSlowOuter.style.display = "none";
+      btnSlowOuter.style.opacity = "0.9";
+      document.body.appendChild(btnSlowOuter);
+
+      btnSlowOuter.addEventListener("click", () => {
+        outerSpeed = Math.max(MIN_SPIN_SPEED, outerSpeed * SLOW_FACTOR);
+      });
+    }
+
+    // Slow inner
+    if (!btnSlowInner) {
+      btnSlowInner = document.createElement("button");
+      btnSlowInner.id = "slowInnerBtn";
+      btnSlowInner.textContent = "Slow Inner Ring";
+      styleBasicButton(btnSlowInner);
+      btnSlowInner.style.display = "none";
+      btnSlowInner.style.opacity = "0.9";
+      document.body.appendChild(btnSlowInner);
+
+      btnSlowInner.addEventListener("click", () => {
+        innerSpeed = Math.max(MIN_SPIN_SPEED, innerSpeed * SLOW_FACTOR);
+      });
+    }
+
+    // ✅ Reverse outer direction
+    if (!btnReverseOuter) {
+      btnReverseOuter = document.createElement("button");
+      btnReverseOuter.id = "reverseOuterBtn";
+      btnReverseOuter.textContent = "Reverse Outer Ring";
+      styleBasicButton(btnReverseOuter);
+      btnReverseOuter.style.display = "none";
+      btnReverseOuter.style.opacity = "0.9";
+      document.body.appendChild(btnReverseOuter);
+
+      btnReverseOuter.addEventListener("click", () => {
+        outerDir *= -1;
+        updateReverseOuterLabel();
+      });
+    }
+
+    // View Home (center)
     if (!btnHome) {
       btnHome = document.createElement("button");
       btnHome.id = "viewHomeBtn";
@@ -195,28 +304,23 @@
         window._meqHomeViewActive = homeActive;
 
         btnHome.textContent = homeActive ? "Exit Moon Network" : "View Quantum Moon Network";
-
-        // bump home button above overlay when active
         btnHome.style.zIndex = String(homeActive ? Z_BTN_ACTIVE : Z_BTN_NORMAL);
 
         ensureOverlayCanvas();
         ensureGifOverlays();
-        ensureButtons(); // make sure overlay + wormhole buttons exist
+        ensureButtons();
 
         overlayCanvas.style.display = homeActive ? "block" : "none";
         setGifVisible(homeActive);
 
         if (homeActive) {
-          // show overlay + wormhole buttons only in home mode
-          btnOverlay.style.display = "block";
-          btnOverlay.style.zIndex = String(Z_BTN_ACTIVE);
-          btnOverlay.textContent = overlayOpaque ? "Transparent Mode" : "Disable Transparency";
+          showHomeControls(true);
 
-          btnWormhole.style.display = "block";
-          btnWormhole.style.zIndex = String(Z_BTN_ACTIVE);
+          btnOverlay.textContent  = overlayOpaque ? "Transparent Mode" : "Disable Transparency";
           btnWormhole.textContent = wormholeActive ? "Deactivate Wormhole" : "Activate Wormhole";
+          updateReverseOuterLabel();
 
-          // align inner on entry
+          // on entering home view, align rings (but don't reset speeds)
           innerRot = homeRot;
 
           const eyeWasEnabled =
@@ -232,15 +336,7 @@
           window._meqEyeEnabled = false;
           window._meqEyeAutoTraverse = false;
         } else {
-          // hide overlay + wormhole buttons when leaving home
-          if (btnOverlay) {
-            btnOverlay.style.display = "none";
-            btnOverlay.style.zIndex = String(Z_BTN_NORMAL);
-          }
-          if (btnWormhole) {
-            btnWormhole.style.display = "none";
-            btnWormhole.style.zIndex = String(Z_BTN_NORMAL);
-          }
+          showHomeControls(false);
 
           if (savedEyeState) {
             if (savedEyeState.eyeWasEnabled) window._meqEyeEnabled = true;
@@ -253,12 +349,13 @@
       });
     }
 
+    // Overlay button (RIGHT of View Home)
     if (!btnOverlay) {
       btnOverlay = document.createElement("button");
       btnOverlay.id = "overlayModeBtn";
       btnOverlay.textContent = "Disable Transparency";
       styleBasicButton(btnOverlay);
-      btnOverlay.style.display = "none"; // ONLY visible in home mode
+      btnOverlay.style.display = "none";
       btnOverlay.style.opacity = "0.9";
       document.body.appendChild(btnOverlay);
 
@@ -270,7 +367,6 @@
         }
 
         btnOverlay.textContent = overlayOpaque ? "Transparent Mode" : "Disable Transparency";
-
         btnOverlay.style.opacity = overlayOpaque ? "1.0" : "0.9";
         btnOverlay.style.filter = overlayOpaque ? "drop-shadow(0 0 4px #000)" : "none";
       });
@@ -280,7 +376,10 @@
     window.addEventListener("resize", positionButtonAndOverlay);
     window.addEventListener("scroll", positionButtonAndOverlay, true);
 
-    return { btnHome, btnOverlay, btnWormhole };
+    return {
+      btnHome, btnOverlay, btnWormhole,
+      btnResetAlign, btnSlowOuter, btnSlowInner, btnReverseOuter
+    };
   }
 
   function positionButtonAndOverlay() {
@@ -289,37 +388,59 @@
 
     const rect = mainCanvas.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
-    const topRow = rect.bottom - 40;
 
-    // View Home stays centered
+    const row1Y = rect.bottom - 40; // main row
+    const row2Y = row1Y + 34;       // second row
+
+    // View Home centered (row 1)
     if (btnHome) {
       btnHome.style.left = `${cx}px`;
-      btnHome.style.top  = `${topRow}px`;
+      btnHome.style.top  = `${row1Y}px`;
     }
 
-    // Wormhole button to LEFT of View Home, only if visible
+    // row 1: wormhole LEFT, overlay RIGHT
     if (btnWormhole && homeActive && btnWormhole.style.display !== "none") {
       const gap = 12;
       const homeRect = btnHome.getBoundingClientRect();
       const wormRect = btnWormhole.getBoundingClientRect();
-
       const wormCenterX = homeRect.left - gap - wormRect.width / 2;
 
       btnWormhole.style.left = `${wormCenterX}px`;
-      btnWormhole.style.top  = `${topRow}px`;
+      btnWormhole.style.top  = `${row1Y}px`;
     }
 
-    // Overlay button to RIGHT of View Home, only if visible
     if (btnOverlay && homeActive && btnOverlay.style.display !== "none") {
       const gap = 12;
-
       const homeRect = btnHome.getBoundingClientRect();
       const overlayRect = btnOverlay.getBoundingClientRect();
-
       const overlayCenterX = homeRect.right + gap + overlayRect.width / 2;
 
       btnOverlay.style.left = `${overlayCenterX}px`;
-      btnOverlay.style.top  = `${topRow}px`;
+      btnOverlay.style.top  = `${row1Y}px`;
+    }
+
+    // row 2: four buttons centered as a group
+    if (homeActive) {
+      const buttonsRow2 = [
+        btnResetAlign, btnSlowOuter, btnSlowInner, btnReverseOuter
+      ].filter(b => b && b.style.display !== "none");
+
+      if (buttonsRow2.length) {
+        const gap = 10;
+
+        const widths = buttonsRow2.map(b => b.getBoundingClientRect().width);
+        const totalW = widths.reduce((a,b)=>a+b,0) + gap * (buttonsRow2.length - 1);
+
+        let startX = cx - totalW / 2;
+        for (let i = 0; i < buttonsRow2.length; i++) {
+          const b = buttonsRow2[i];
+          const w = widths[i];
+          const centerXbtn = startX + w / 2;
+          b.style.left = `${centerXbtn}px`;
+          b.style.top  = `${row2Y}px`;
+          startX += w + gap;
+        }
+      }
     }
 
     // Overlay canvas exactly on top of main canvas
@@ -379,7 +500,7 @@
     const nodeSizeCanvas = minDim * 0.05;
 
     const rotOuter = homeRot;
-    const rotInner = wormholeActive ? innerRot : homeRot;
+    const rotInner = innerRot;
 
     const outerCoords = OUTER_ORDER.map((num, i) => {
       const angle = (i / OUTER_ORDER.length) * Math.PI * 2 - Math.PI / 2 + rotOuter;
@@ -409,7 +530,7 @@
 
     ctx.save();
 
-    // spokes colored like outer nodes
+    // spokes (Earth→Moon)
     ctx.lineWidth = 2.5;
     innerCoords.forEach((inner) => {
       const [a, b] = inner.pair;
@@ -417,14 +538,14 @@
       const ob = outerCoords.find(o => o.num === b);
 
       if (oa) {
-        ctx.strokeStyle = getNodeColor(a);
+        ctx.strokeStyle = wormholeActive ? "#00ff00" : getNodeColor(a);
         ctx.beginPath();
         ctx.moveTo(inner.x, inner.y);
         ctx.lineTo(oa.x, oa.y);
         ctx.stroke();
       }
       if (ob) {
-        ctx.strokeStyle = getNodeColor(b);
+        ctx.strokeStyle = wormholeActive ? "#00ff00" : getNodeColor(b);
         ctx.beginPath();
         ctx.moveTo(inner.x, inner.y);
         ctx.lineTo(ob.x, ob.y);
@@ -432,23 +553,24 @@
       }
     });
 
-    // inner 6-node star (two triangles)
+    // inner 6-node star (Moon→Moon) — ONLY existing parity lines
     for (let i = 0; i < innerCoords.length; i++) {
       for (let j = i + 1; j < innerCoords.length; j++) {
         const a = innerCoords[i];
         const b = innerCoords[j];
+
         const aOdd = a.num % 2 !== 0;
         const bOdd = b.num % 2 !== 0;
 
         if (aOdd && bOdd) {
-          ctx.strokeStyle = "#FF00FF";
+          ctx.strokeStyle = wormholeActive ? "red" : "#FF00FF";
           ctx.lineWidth = 2.0;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
           ctx.stroke();
         } else if (!aOdd && !bOdd) {
-          ctx.strokeStyle = "#FF0000";
+          ctx.strokeStyle = wormholeActive ? "red" : "#FF0000";
           ctx.lineWidth = 2.0;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
@@ -527,16 +649,11 @@
       if (window._meqEyeAutoTraverse) window._meqEyeAutoTraverse = false;
 
       if (window._meqBigWheelSpinEnabled !== false) {
-        // outer always forward
-        homeRot += BASE_SPIN_SPEED;
+        // outer ring uses outerDir
+        homeRot += outerSpeed * outerDir;
 
-        if (wormholeActive) {
-          // inner spins continuously in chosen direction
-          innerRot += BASE_SPIN_SPEED * wormholeDir;
-        } else {
-          // inner matches outer when wormhole off
-          innerRot = homeRot;
-        }
+        // inner ring: reverse if wormhole, otherwise forward
+        innerRot += innerSpeed * (wormholeActive ? wormholeDir : 1);
       }
 
       drawHomeWheel();
