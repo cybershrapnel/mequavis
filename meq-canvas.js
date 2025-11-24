@@ -261,7 +261,7 @@ function ensureOmegaEarthOverlay() {
   omegaEarthEl.style.height = "0px";
   omegaEarthEl.style.transform = "translate(-50%, -50%)";
   omegaEarthEl.style.pointerEvents = "none";
-  omegaEarthEl.style.zIndex = "9999"; // on top of canvas
+  omegaEarthEl.style.zIndex = "50"; // on top of canvas
 
   document.body.appendChild(omegaEarthEl);
   return omegaEarthEl;
