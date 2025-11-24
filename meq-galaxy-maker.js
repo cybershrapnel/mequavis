@@ -439,7 +439,16 @@
     const btnDLRoot      = mkToolBtn("dlRootImgBtn", "Download Original Galaxy");
     const btnDLFinal     = mkToolBtn("dlFinalImgBtn", "Download Final Zoom");
     const btnDLBoxed     = mkToolBtn("dlBoxedImgBtn", "Download Selected Area");
-    const btnLoadSkybox  = mkToolBtn("loadSkyboxBtn", "Load Skybox");
+const btnLoadSkybox  = mkToolBtn("loadSkyboxBtn", "Load & View Your Skybox");
+
+// make it special + green + push to far right
+btnLoadSkybox.classList.add("skybox-special");
+btnLoadSkybox.style.marginLeft = "auto";                 // shove to right in flex row
+btnLoadSkybox.style.borderColor = "#00ff00";
+btnLoadSkybox.style.color = "#00ff00";
+btnLoadSkybox.style.background = "#061a06";
+btnLoadSkybox.style.boxShadow = "0 0 8px rgba(0,255,0,0.6)";
+
     const btnZipAll      = mkToolBtn("zipAllBtn", "Download all as zip"); // ✅ new
 
     consoleToolbar.appendChild(btnCopyJSON);
@@ -449,8 +458,10 @@
     consoleToolbar.appendChild(btnDLRoot);
     consoleToolbar.appendChild(btnDLFinal);
     consoleToolbar.appendChild(btnDLBoxed);
-    consoleToolbar.appendChild(btnLoadSkybox);
+
     consoleToolbar.appendChild(btnZipAll);
+
+    consoleToolbar.appendChild(btnLoadSkybox);
 
     consolePre = document.createElement("pre");
     consolePre.id = "galaxyConsolePre";
@@ -496,11 +507,12 @@
     ftActionBtn.style.borderColor = accent;
     ftActionBtn.style.color = accent;
 
-    consoleToolbar.style.borderBottomColor = accent;
-    consoleToolbar.querySelectorAll("button").forEach(b => {
-      b.style.borderColor = accent;
-      b.style.color = accent;
-    });
+consoleToolbar.querySelectorAll("button").forEach(b => {
+  if (b.classList.contains("skybox-special")) return; // leave it green
+  b.style.borderColor = accent;
+  b.style.color = accent;
+});
+
   }
 
   function updateFooterMode() {
@@ -586,7 +598,7 @@
       stars: currentStars,
       starsPerDot,
       ultraFinal
-    });
+      });
 
     zoomLevel++;
     ultraFinal = false;
@@ -1313,6 +1325,23 @@
     }
 
     const catalog = { stars: starsOut, planets: planetsOut };
+
+    // ==========================================================
+    // MEQ APPENDIX (added at end, safe to ignore by loader)
+    // Stores:
+    //  - original sector JSON
+    //  - 4 base64 image dataURLs (if present)
+    // ==========================================================
+    catalog.__meq_appendix = {
+      sectorJSON: sectorJSON, // your original galactic-sector.json
+      images: {
+        originalGalaxy: rootImageURL || null,
+        finalZoom: finalZoomImageURL || null,
+        finalSelectedCrop: finalSelectedCropURL || null,
+        finalBoxed: finalBoxedImageURL || null
+      }
+    };
+
     return JSON.stringify(catalog);
   }
 
