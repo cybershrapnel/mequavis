@@ -647,6 +647,8 @@ function drawNofur(baseX, baseY, label, rotation = 0, scale = 1, spinInner = tru
 
   let innerCoords = [];
   const innerRot = spinInner ? rotation : 0;
+
+
   for (let i = 0; i < innerPairs.length; i++) {
     const aIndex = outerOrder.indexOf(innerPairs[i][0]);
     const bIndex = outerOrder.indexOf(innerPairs[i][1]);
@@ -850,7 +852,9 @@ function drawOmniverse(baseX,baseY,rot,scale=1,isSmall=false,isLeft=false,isRigh
       speed = rot * 0.8;
     }
 
-    const spinInner = !(isLeft || isRight);
+    //const spinInner = !(isLeft || isRight);
+const spinInner = true; // allow inner spin on small nofurs too
+
     const cx = baseX + dx;
     const cy = baseY + dy;
 
