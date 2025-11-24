@@ -1,8 +1,13 @@
-/* meq-galaxy-maker.js (v15)
+/* meq-galaxy-maker.js (v16)
    Drop this AFTER your UI loads.
 
-   v15:
-   ✅ Load Skybox now uploads catalog, shows progress, and opens returned skyboxUrl IN the skybox iframe panel.
+   v16:
+   ✅ __meq_appendix now includes uuid, createdAt, title, filename, galaxyType.
+      - title/filename update to the user's upload title, or a default
+        "Galactic Sector <number>" -> filename "Galactic-Sector-<number>.txt"
+   ✅ Open skybox without toggling if skyboxPanel is already visible.
+   ✅ Close galaxy maker popup after successful upload + after opening skybox iframe.
+   ✅ Load Skybox uploads catalog, shows progress, and opens returned skyboxUrl IN skybox iframe panel.
    ✅ Add "Download all as zip" button beside Load Skybox.
    ✅ Zip includes JSON, catalog txt, original galaxy, final zoom, selected crop,
       and final boxed image with green rectangle.
@@ -144,6 +149,18 @@
     }, 0);
   }
 
+  function makeUUID() {
+    try {
+      if (crypto?.randomUUID) return crypto.randomUUID();
+    } catch {}
+    // fallback
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      const v = c === "x" ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   // -----------------------------
   // Skybox panel opener (uses your meq-skybox panel)
   // -----------------------------
@@ -163,17 +180,39 @@
     return null;
   }
 
+  function isSkyboxPanelOpen(panel) {
+    if (!panel) return false;
+    const disp = (panel.style.display || "").toLowerCase();
+    if (disp && disp !== "none") return true;
+    try {
+      const cs = getComputedStyle(panel);
+      return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+    } catch {
+      return false;
+    }
+  }
+
   function openSkyboxInPanel(url) {
     const panel = document.getElementById("skyboxPanel");
     const iframe = document.getElementById("skyboxFrame");
     const toggleBtn = findSkyboxToggleButton();
 
-    if (panel && panel.style.display !== "block") {
-      // Prefer clicking the toggle button so its label stays in sync
+    const panelOpen = isSkyboxPanelOpen(panel);
+
+    if (panel) {
+      if (!panelOpen) {
+        // Prefer clicking the toggle button so its label stays in sync
+        if (toggleBtn) {
+          try { toggleBtn.click(); } catch(e) {}
+        } else {
+          panel.style.display = "flex";
+        }
+      }
+      // if already open, DO NOT click toggle
+    } else {
+      // last resort if panel not found but toggle exists
       if (toggleBtn) {
         try { toggleBtn.click(); } catch(e) {}
-      } else {
-        panel.style.display = "block";
       }
     }
 
@@ -263,6 +302,24 @@
   // Last build outputs
   let lastSectorJSON = null;
   let lastStarCatalogText = null;
+
+  // Last sector metadata for appendix / uploads
+  let lastSectorMeta = null;
+
+  function initSectorMeta(seedTitle = null) {
+    const createdAt = new Date().toISOString();
+    const uuid = makeUUID();
+    const seed = seedTitle || `Galactic Sector ${Date.now()}`;
+    const title = seed;
+    const filename = safeFileStem(seed) + ".txt";
+    return {
+      uuid,
+      createdAt,
+      title,
+      filename,
+      galaxyType: currentGalaxyName
+    };
+  }
 
   function ensurePopup() {
     if (popup) return popup;
@@ -439,15 +496,15 @@
     const btnDLRoot      = mkToolBtn("dlRootImgBtn", "Download Original Galaxy");
     const btnDLFinal     = mkToolBtn("dlFinalImgBtn", "Download Final Zoom");
     const btnDLBoxed     = mkToolBtn("dlBoxedImgBtn", "Download Selected Area");
-const btnLoadSkybox  = mkToolBtn("loadSkyboxBtn", "Load & View Your Skybox");
+    const btnLoadSkybox  = mkToolBtn("loadSkyboxBtn", "Load & View Your Skybox");
 
-// make it special + green + push to far right
-btnLoadSkybox.classList.add("skybox-special");
-btnLoadSkybox.style.marginLeft = "auto";                 // shove to right in flex row
-btnLoadSkybox.style.borderColor = "#00ff00";
-btnLoadSkybox.style.color = "#00ff00";
-btnLoadSkybox.style.background = "#061a06";
-btnLoadSkybox.style.boxShadow = "0 0 8px rgba(0,255,0,0.6)";
+    // make it special + green + push to far right
+    btnLoadSkybox.classList.add("skybox-special");
+    btnLoadSkybox.style.marginLeft = "auto";                 // shove to right in flex row
+    btnLoadSkybox.style.borderColor = "#00ff00";
+    btnLoadSkybox.style.color = "#00ff00";
+    btnLoadSkybox.style.background = "#061a06";
+    btnLoadSkybox.style.boxShadow = "0 0 8px rgba(0,255,0,0.6)";
 
     const btnZipAll      = mkToolBtn("zipAllBtn", "Download all as zip"); // ✅ new
 
@@ -507,12 +564,11 @@ btnLoadSkybox.style.boxShadow = "0 0 8px rgba(0,255,0,0.6)";
     ftActionBtn.style.borderColor = accent;
     ftActionBtn.style.color = accent;
 
-consoleToolbar.querySelectorAll("button").forEach(b => {
-  if (b.classList.contains("skybox-special")) return; // leave it green
-  b.style.borderColor = accent;
-  b.style.color = accent;
-});
-
+    consoleToolbar.querySelectorAll("button").forEach(b => {
+      if (b.classList.contains("skybox-special")) return; // leave it green
+      b.style.borderColor = accent;
+      b.style.color = accent;
+    });
   }
 
   function updateFooterMode() {
@@ -543,7 +599,11 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
       const jsonObj = buildSectorJSON(finalStars, selectionCanvasRect);
       lastSectorJSON = jsonObj;
 
-      lastStarCatalogText = buildStarCatalogTXT(jsonObj);
+      // init meta once per build
+      if (!lastSectorMeta) lastSectorMeta = initSectorMeta();
+      lastSectorMeta.galaxyType = jsonObj.galaxyType || currentGalaxyName;
+
+      lastStarCatalogText = buildStarCatalogTXT(jsonObj, lastSectorMeta);
 
       showConsole(jsonObj, lastStarCatalogText);
       return;
@@ -756,16 +816,31 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     consolePre.appendChild(wrap);
 
     proceed.onclick = () => {
-      const title = ta.value.trim() || "Galactic Sector";
+      const rawInputTitle = ta.value.trim();
+
+      // If user didn't name it, auto-seed a numbered title so filename becomes Galactic-Sector-<number>.txt
+      const title = rawInputTitle || `Galactic Sector ${Date.now()}`;
+      const stem = safeFileStem(title);
+      const filename = stem + ".txt";
+
+      // ensure meta exists, then update title/filename/galaxyType
+      if (!lastSectorMeta) lastSectorMeta = initSectorMeta(title);
+      lastSectorMeta.title = title;
+      lastSectorMeta.filename = filename;
+      lastSectorMeta.galaxyType = jsonObj.galaxyType || currentGalaxyName;
+
+      // rebuild catalog with correct appendix BEFORE upload
+      const updatedCatalogTxt = buildStarCatalogTXT(jsonObj, lastSectorMeta);
+      lastStarCatalogText = updatedCatalogTxt;
+
       status.textContent = "Uploading starcatalog.txt...";
       proceed.disabled = true;
 
-      const stem = safeFileStem(title);
-      const blob = new Blob([catalogTxt || ""], { type: "text/plain;charset=utf-8" });
+      const blob = new Blob([updatedCatalogTxt || ""], { type: "text/plain;charset=utf-8" });
 
       const fd = new FormData();
       fd.append("title", title);
-      fd.append("file", blob, stem + ".txt");
+      fd.append("file", blob, filename);
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", STARMAP_UPLOAD_URL, true);
@@ -793,6 +868,9 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
           setTimeout(() => {
             openSkyboxInPanel(resp.skyboxUrl);
             status.textContent = "Skybox opened in panel.";
+
+            // ✅ close galaxy maker after opening iframe
+            togglePopup(false);
           }, 2000);
 
         } catch (err) {
@@ -1105,7 +1183,7 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     };
   }
 
-  function buildStarCatalogTXT(sectorJSON) {
+  function buildStarCatalogTXT(sectorJSON, metaOverride=null) {
     const rand = (a, b) => a + Math.random() * (b - a);
     const randInt = (a, b) => Math.floor(rand(a, b + 1));
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -1331,8 +1409,15 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     // Stores:
     //  - original sector JSON
     //  - 4 base64 image dataURLs (if present)
+    //  - build + filename identity to prevent wrong-save loads
     // ==========================================================
+    const meta = metaOverride || lastSectorMeta || initSectorMeta();
     catalog.__meq_appendix = {
+      uuid: meta.uuid,
+      createdAt: meta.createdAt,
+      title: meta.title,
+      filename: meta.filename,
+      galaxyType: meta.galaxyType || sectorJSON.galaxyType || currentGalaxyName,
       sectorJSON: sectorJSON, // your original galactic-sector.json
       images: {
         originalGalaxy: rootImageURL || null,
@@ -1561,6 +1646,7 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
 
     lastSectorJSON = null;
     lastStarCatalogText = null;
+    lastSectorMeta = null;
 
     ftType.textContent = `Galaxy Type: ${currentGalaxyName}`;
     updateCountFooter();
@@ -1940,4 +2026,3 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     `;
     document.head.appendChild(style);
   }
-
