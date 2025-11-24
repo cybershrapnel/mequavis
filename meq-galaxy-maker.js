@@ -1878,6 +1878,7 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     if (!btn) return;
 
     ensurePopup();
+    injectMeqScrollbarTheme(); // ✅ add this line
 
     btn.addEventListener("click", () => {
       if (!isOpen) togglePopup(true);
@@ -1894,3 +1895,49 @@ consoleToolbar.querySelectorAll("button").forEach(b => {
     init();
   }
 })();
+
+
+  // -----------------------------
+  // MEQ Scrollbar Theme Injector
+  // -----------------------------
+  function injectMeqScrollbarTheme() {
+    if (document.getElementById("meqScrollbarTheme")) return; // idempotent
+
+    const style = document.createElement("style");
+    style.id = "meqScrollbarTheme";
+    style.textContent = `
+      /* ==========================================
+         MEQ Scrollbar Theme (accent-driven)
+         ========================================== */
+
+      /* Firefox */
+      html, body, * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--meq-accent) rgba(0,0,0,0.6);
+      }
+
+      /* WebKit (Chrome / Edge / Safari) */
+      *::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      *::-webkit-scrollbar-track {
+        background: rgba(0,0,0,0.6);
+        border-radius: 999px;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        background: var(--meq-accent);
+        border-radius: 999px;
+        border: 2px solid rgba(0,0,0,0.6);
+        box-shadow: 0 0 6px rgba(0,0,0,0.8) inset;
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        filter: brightness(1.2);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
