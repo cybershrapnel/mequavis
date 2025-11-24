@@ -1,9 +1,11 @@
-/* meq-galaxy-maker.js (v13)
+/* meq-galaxy-maker.js (v15)
    Drop this AFTER your UI loads.
 
-   v13:
-   ✅ Download Selected Area = cropped selection, NO green border.
-   ✅ Console background prefers cropped selection.
+   v15:
+   ✅ Load Skybox now uploads catalog, shows progress, and opens returned skyboxUrl IN the skybox iframe panel.
+   ✅ Add "Download all as zip" button beside Load Skybox.
+   ✅ Zip includes JSON, catalog txt, original galaxy, final zoom, selected crop,
+      and final boxed image with green rectangle.
 */
 
 (() => {
@@ -62,6 +64,20 @@
     }, 0);
   }
 
+  function downloadText(txt, filename="starcatalog.txt") {
+    const blob = new Blob([txt], { type:"text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
   async function copyTextToClipboard(txt) {
     try {
       if (navigator.clipboard?.writeText) {
@@ -82,6 +98,95 @@
     } catch {}
     return false;
   }
+
+  function safeFileStem(name) {
+    const stem = (name || "galactic-sector")
+      .toString()
+      .trim()
+      .replace(/[^a-z0-9_\-]+/gi, "-")
+      .replace(/^-+|-+$/g, "");
+    return stem || "galactic-sector";
+  }
+
+  function dataURLToBlob(dataURL) {
+    const parts = dataURL.split(",");
+    const meta = parts[0];
+    const base64 = parts[1];
+    const mime = (meta.match(/data:([^;]+);base64/i) || [])[1] || "application/octet-stream";
+    const binStr = atob(base64);
+    const len = binStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binStr.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+
+  function ensureJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      s.onload = () => resolve(window.JSZip);
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
+  // -----------------------------
+  // Skybox panel opener (uses your meq-skybox panel)
+  // -----------------------------
+  function findSkyboxToggleButton() {
+    const byAction = document.querySelector('.action-btn[data-action="map-ui"]');
+    if (byAction) return byAction;
+
+    const candidates = Array.from(
+      document.querySelectorAll('button, .action-btn, input[type="button"], input[type="submit"]')
+    );
+    for (const el of candidates) {
+      const txt = (el.textContent || el.value || "").trim().toUpperCase();
+      if (txt === "SHOW DIGITAL SKYBOX" || txt === "HIDE DIGITAL SKYBOX" || txt === "SHOW MAP UI") {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function openSkyboxInPanel(url) {
+    const panel = document.getElementById("skyboxPanel");
+    const iframe = document.getElementById("skyboxFrame");
+    const toggleBtn = findSkyboxToggleButton();
+
+    if (panel && panel.style.display !== "block") {
+      // Prefer clicking the toggle button so its label stays in sync
+      if (toggleBtn) {
+        try { toggleBtn.click(); } catch(e) {}
+      } else {
+        panel.style.display = "block";
+      }
+    }
+
+    if (iframe) {
+      iframe.src = url;
+    } else {
+      // last resort: same-tab navigation
+      window.location.href = url;
+    }
+  }
+
+  // Upload endpoint for Load Skybox
+  const STARMAP_UPLOAD_URL = "https://xtdevelopment.net/chat-proxy/starmaps/starmaps.php";
 
   // -----------------------------
   // Insert button in rightTop
@@ -153,7 +258,11 @@
   let rootImageURL = null;
   let finalZoomImageURL = null;        // ultra-final before box
   let finalBoxedImageURL = null;       // ultra-final with green box (optional)
-  let finalSelectedCropURL = null;     // ✅ cropped selection, no border
+  let finalSelectedCropURL = null;     // cropped selection, no border
+
+  // Last build outputs
+  let lastSectorJSON = null;
+  let lastStarCatalogText = null;
 
   function ensurePopup() {
     if (popup) return popup;
@@ -301,6 +410,7 @@
       font-family: monospace;
       flex: 0 0 auto;
       align-items: center;
+      flex-wrap: wrap;
     `;
 
     const mkToolBtn = (id, label) => {
@@ -322,17 +432,25 @@
       return b;
     };
 
-    const btnCopyJSON   = mkToolBtn("copySectorJsonBtn", "Copy JSON");
-    const btnDLJSON     = mkToolBtn("dlSectorJsonBtn", "Download JSON");
-    const btnDLRoot     = mkToolBtn("dlRootImgBtn", "Download Original Galaxy");
-    const btnDLFinal    = mkToolBtn("dlFinalImgBtn", "Download Final Zoom");
-    const btnDLBoxed    = mkToolBtn("dlBoxedImgBtn", "Download Selected Area");
+    const btnCopyJSON    = mkToolBtn("copySectorJsonBtn", "Copy JSON");
+    const btnDLJSON      = mkToolBtn("dlSectorJsonBtn", "Download JSON");
+    const btnCopyCatalog = mkToolBtn("copyStarCatalogBtn", "Copy Catalog");
+    const btnDLCatalog   = mkToolBtn("dlStarCatalogBtn", "Download Catalog");
+    const btnDLRoot      = mkToolBtn("dlRootImgBtn", "Download Original Galaxy");
+    const btnDLFinal     = mkToolBtn("dlFinalImgBtn", "Download Final Zoom");
+    const btnDLBoxed     = mkToolBtn("dlBoxedImgBtn", "Download Selected Area");
+    const btnLoadSkybox  = mkToolBtn("loadSkyboxBtn", "Load Skybox");
+    const btnZipAll      = mkToolBtn("zipAllBtn", "Download all as zip"); // ✅ new
 
     consoleToolbar.appendChild(btnCopyJSON);
     consoleToolbar.appendChild(btnDLJSON);
+    consoleToolbar.appendChild(btnCopyCatalog);
+    consoleToolbar.appendChild(btnDLCatalog);
     consoleToolbar.appendChild(btnDLRoot);
     consoleToolbar.appendChild(btnDLFinal);
     consoleToolbar.appendChild(btnDLBoxed);
+    consoleToolbar.appendChild(btnLoadSkybox);
+    consoleToolbar.appendChild(btnZipAll);
 
     consolePre = document.createElement("pre");
     consolePre.id = "galaxyConsolePre";
@@ -411,7 +529,11 @@
     if (ultraFinal) {
       const finalStars = getStarsInSelection(selectionCanvasRect, currentStars);
       const jsonObj = buildSectorJSON(finalStars, selectionCanvasRect);
-      showConsole(jsonObj);
+      lastSectorJSON = jsonObj;
+
+      lastStarCatalogText = buildStarCatalogTXT(jsonObj);
+
+      showConsole(jsonObj, lastStarCatalogText);
       return;
     }
 
@@ -478,11 +600,14 @@
     updateCountFooter();
   }
 
-  function showConsole(jsonObj) {
+  // -----------------------------
+  // Console view + buttons
+  // -----------------------------
+  function showConsole(jsonObj, catalogTxt) {
     canvas.style.display = "none";
     footer.style.display = "none";
 
-    // ✅ background prefers cropped selection w/ no border
+    // background prefers cropped selection
     if (finalSelectedCropURL) {
       popup.style.backgroundImage = `url(${finalSelectedCropURL})`;
     } else if (finalBoxedImageURL) {
@@ -500,34 +625,227 @@
     const jsonText = JSON.stringify(jsonObj, null, 2);
     consolePre.textContent = jsonText;
 
-    const btnCopyJSON = document.getElementById("copySectorJsonBtn");
-    const btnDLJSON   = document.getElementById("dlSectorJsonBtn");
-    const btnDLRoot   = document.getElementById("dlRootImgBtn");
-    const btnDLFinal  = document.getElementById("dlFinalImgBtn");
-    const btnDLBoxed  = document.getElementById("dlBoxedImgBtn");
+    const btnCopyJSON     = document.getElementById("copySectorJsonBtn");
+    const btnDLJSON       = document.getElementById("dlSectorJsonBtn");
+    const btnCopyCatalog  = document.getElementById("copyStarCatalogBtn");
+    const btnDLCatalog    = document.getElementById("dlStarCatalogBtn");
+    const btnDLRoot       = document.getElementById("dlRootImgBtn");
+    const btnDLFinal      = document.getElementById("dlFinalImgBtn");
+    const btnDLBoxed      = document.getElementById("dlBoxedImgBtn");
+    const btnLoadSkybox   = document.getElementById("loadSkyboxBtn");
+    const btnZipAll       = document.getElementById("zipAllBtn");
 
-    if (btnCopyJSON) {
-      btnCopyJSON.onclick = async () => {
-        await copyTextToClipboard(jsonText);
+    if (btnCopyJSON) btnCopyJSON.onclick = async () => { await copyTextToClipboard(jsonText); };
+    if (btnDLJSON)   btnDLJSON.onclick   = () => downloadJSON(jsonObj, "galactic-sector.json");
+
+    if (btnCopyCatalog) btnCopyCatalog.onclick = async () => {
+      await copyTextToClipboard(catalogTxt || "");
+    };
+    if (btnDLCatalog) btnDLCatalog.onclick = () => {
+      downloadText(catalogTxt || "", "starcatalog.txt");
+    };
+
+    if (btnDLRoot)  btnDLRoot.onclick  = () => downloadDataURL(rootImageURL, "original-galaxy.png");
+    if (btnDLFinal) btnDLFinal.onclick = () => downloadDataURL(finalZoomImageURL, "final-zoom.png");
+    if (btnDLBoxed) btnDLBoxed.onclick = () =>
+      downloadDataURL(finalSelectedCropURL || finalZoomImageURL, "final-zoom-selected.png");
+
+    // ✅ Load Skybox upload flow
+    if (btnLoadSkybox) {
+      btnLoadSkybox.onclick = () => beginSkyboxUploadFlow(jsonObj, catalogTxt);
+    }
+
+    // ✅ ZIP download
+    if (btnZipAll) {
+      btnZipAll.onclick = () => downloadAllAsZip(jsonObj, catalogTxt);
+    }
+  }
+
+  function beginSkyboxUploadFlow(jsonObj, catalogTxt) {
+    const accent = getAccent();
+
+    // Replace consolePre with form UI
+    consolePre.style.display = "block";
+    consolePre.innerHTML = ""; // clear
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `
+      font-family: monospace;
+      font-size: 12px;
+      color: ${accent};
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px;
+    `;
+
+    const label = document.createElement("div");
+    label.textContent = "Galactic Sector Title:";
+
+    const ta = document.createElement("textarea");
+    ta.id = "skyboxTitleInput";
+    ta.rows = 2;
+    ta.placeholder = "Enter sector title...";
+    ta.style.cssText = `
+      width: 100%;
+      resize: vertical;
+      background: #050505;
+      color: ${accent};
+      border: 1px solid ${accent};
+      padding: 6px;
+      border-radius: 6px;
+      outline: none;
+    `;
+
+    const proceed = document.createElement("button");
+    proceed.textContent = "Proceed Upload";
+    proceed.style.cssText = `
+      width: fit-content;
+      padding: 6px 10px;
+      background: #111;
+      color: ${accent};
+      border: 1px solid ${accent};
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    `;
+
+    const barWrap = document.createElement("div");
+    barWrap.style.cssText = `
+      width: 100%;
+      height: 12px;
+      background: #111;
+      border: 1px solid ${accent};
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 4px;
+    `;
+
+    const bar = document.createElement("div");
+    bar.id = "skyboxUploadBar";
+    bar.style.cssText = `
+      height: 100%;
+      width: 0%;
+      background: ${accent};
+      transition: width 0.1s linear;
+    `;
+    barWrap.appendChild(bar);
+
+    const status = document.createElement("div");
+    status.id = "skyboxUploadStatus";
+    status.textContent = "Ready.";
+
+    wrap.appendChild(label);
+    wrap.appendChild(ta);
+    wrap.appendChild(proceed);
+    wrap.appendChild(barWrap);
+    wrap.appendChild(status);
+
+    consolePre.appendChild(wrap);
+
+    proceed.onclick = () => {
+      const title = ta.value.trim() || "Galactic Sector";
+      status.textContent = "Uploading starcatalog.txt...";
+      proceed.disabled = true;
+
+      const stem = safeFileStem(title);
+      const blob = new Blob([catalogTxt || ""], { type: "text/plain;charset=utf-8" });
+
+      const fd = new FormData();
+      fd.append("title", title);
+      fd.append("file", blob, stem + ".txt");
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", STARMAP_UPLOAD_URL, true);
+
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round((e.loaded / e.total) * 100);
+        bar.style.width = pct + "%";
+        status.textContent = "Uploading... " + pct + "%";
       };
-    }
 
-    if (btnDLJSON) {
-      btnDLJSON.onclick = () => downloadJSON(jsonObj, "galactic-sector.json");
-    }
+      xhr.onload = () => {
+        proceed.disabled = false;
+        try {
+          const resp = JSON.parse(xhr.responseText || "{}");
+          if (!resp.ok || !resp.skyboxUrl) {
+            status.textContent = "Upload failed: " + (resp.error || "Unknown error");
+            return;
+          }
 
-    if (btnDLRoot) {
-      btnDLRoot.onclick = () => downloadDataURL(rootImageURL, "original-galaxy.png");
-    }
+          bar.style.width = "100%";
+          status.textContent = "Uploaded. Opening Skybox...";
 
-    if (btnDLFinal) {
-      btnDLFinal.onclick = () => downloadDataURL(finalZoomImageURL, "final-zoom.png");
-    }
+          // wait a couple seconds as requested
+          setTimeout(() => {
+            openSkyboxInPanel(resp.skyboxUrl);
+            status.textContent = "Skybox opened in panel.";
+          }, 2000);
 
-    // ✅ cropped selection, no green border
-    if (btnDLBoxed) {
-      btnDLBoxed.onclick = () =>
-        downloadDataURL(finalSelectedCropURL || finalZoomImageURL, "final-zoom-selected.png");
+        } catch (err) {
+          status.textContent = "Upload response parse error.";
+        }
+      };
+
+      xhr.onerror = () => {
+        proceed.disabled = false;
+        status.textContent = "Upload failed (network error).";
+      };
+
+      xhr.send(fd);
+    };
+  }
+
+  async function downloadAllAsZip(jsonObj, catalogTxt) {
+    const accent = getAccent();
+    const btnZipAll = document.getElementById("zipAllBtn");
+    const oldLabel = btnZipAll ? btnZipAll.textContent : "";
+
+    try {
+      if (btnZipAll) btnZipAll.textContent = "Zipping...";
+
+      const JSZip = await ensureJSZip();
+      const zip = new JSZip();
+
+      // Add JSON and catalog
+      zip.file("galactic-sector.json", JSON.stringify(jsonObj, null, 2));
+      zip.file("starcatalog.txt", catalogTxt || "");
+
+      // Images (data URLs)
+      if (rootImageURL) {
+        zip.file("original-galaxy.png", dataURLToBlob(rootImageURL));
+      }
+      if (finalZoomImageURL) {
+        zip.file("final-zoom.png", dataURLToBlob(finalZoomImageURL));
+      }
+      if (finalSelectedCropURL) {
+        zip.file("final-zoom-selected.png", dataURLToBlob(finalSelectedCropURL));
+      }
+      if (finalBoxedImageURL) {
+        zip.file("final-zoom-boxed.png", dataURLToBlob(finalBoxedImageURL));
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+
+      const nameStem = safeFileStem(jsonObj.galaxyType || "galactic-sector");
+      downloadBlob(blob, nameStem + "-bundle.zip");
+
+      if (btnZipAll) btnZipAll.textContent = oldLabel || "Download all as zip";
+    } catch (e) {
+      console.error("ZIP failed:", e);
+      if (btnZipAll) btnZipAll.textContent = (oldLabel || "Download all as zip") + " (failed)";
+      setTimeout(() => {
+        if (btnZipAll) btnZipAll.textContent = oldLabel || "Download all as zip";
+      }, 1500);
+
+      // Also print to consolePre for visibility
+      if (consolePre && consolePre.style.display === "block") {
+        const msg = document.createElement("div");
+        msg.style.color = accent;
+        msg.textContent = "ZIP failed: " + (e.message || e);
+        consolePre.appendChild(msg);
+      }
     }
   }
 
@@ -607,16 +925,16 @@
       updateCountFooter();
       redrawWithSelection();
 
-      // ✅ ultra-final: capture BOTH boxed and cropped
+      // ultra-final: capture BOTH boxed and cropped
       if (ultraFinal && selectionCanvasRect && selectionCanvasRect.w > 6 && selectionCanvasRect.h > 6) {
         const W = canvas.width;
         const H = canvas.height;
         const r = selectionCanvasRect;
 
-        // 1) boxed (current canvas includes green border)
+        // boxed (current canvas includes green border)
         finalBoxedImageURL = canvas.toDataURL("image/png");
 
-        // 2) cropped from base view WITHOUT border
+        // cropped from base view WITHOUT border
         if (lastViewImage) {
           const tmp = document.createElement("canvas");
           tmp.width = W;
@@ -773,6 +1091,229 @@
       starCount: starsOut.length,
       stars: starsOut
     };
+  }
+
+  function buildStarCatalogTXT(sectorJSON) {
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const randInt = (a, b) => Math.floor(rand(a, b + 1));
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+    const R_SUN_LY = 7.35355e-8;
+    const AU_LY = 1.58125e-5;          // 1 AU in lightyears (matches your working data)
+    const EARTH_MASS_KG = 5.9722e24;
+    const EARTH_RADIUS_LY = 6.734e-10; // Earth radius in ly (matches your working data)
+
+    // We shrink radii to keep corona sane.
+    const CORONA_SHRINK = 5;
+
+    function mkValue(source, unit, quantity, measurementQualifier) {
+      const obj = { source, value: { unit, quantity } };
+      if (measurementQualifier) obj.measurementQualifier = measurementQualifier;
+      return obj;
+    }
+
+    function tempToClass(T) {
+      if (T >= 7500) return "A";
+      if (T >= 6000) return "F";
+      if (T >= 5200) return "G";
+      if (T >= 3700) return "K";
+      return "M";
+    }
+
+    function classToRaw(mainClass) {
+      const subclass = randInt(0, 9);
+      const lum = pick(["V", "IV", "", "III"]);
+      return `${mainClass}${subclass}${lum}`;
+    }
+
+    function makeStarFromGrid(starIn, idx, grid, scaleLyPerUnit) {
+      const gx = starIn.x;
+      const gy = starIn.y;
+      const gz = starIn.z;
+
+      const cx = (gx - grid.width / 2) * scaleLyPerUnit;
+      const cy = (gy - grid.height / 2) * scaleLyPerUnit;
+      const cz = (gz - grid.depth / 2) * scaleLyPerUnit;
+
+      const solDist = Math.sqrt(cx*cx + cy*cy + cz*cz);
+
+      const rSol = rand(0.2, 2.8);
+      const radiusLy = (R_SUN_LY * rSol) / CORONA_SHRINK;
+
+      const tempK = rand(2800, 9000);
+      const mainClass = tempToClass(tempK);
+
+      const absMag = (() => {
+        switch (mainClass) {
+          case "A": return rand(0.5, 3.0);
+          case "F": return rand(2.0, 5.0);
+          case "G": return rand(3.5, 6.5);
+          case "K": return rand(5.0, 9.0);
+          case "M": return rand(8.0, 16.0);
+          default: return rand(4.0, 12.0);
+        }
+      })();
+
+      const raRad  = rand(0, Math.PI * 2);
+      const decRad = rand(-Math.PI/2, Math.PI/2);
+
+      const primaryId = idx;
+
+      return {
+        absoluteMagnitude: mkValue("INFERRED", "MV", absMag),
+        identifiers: {
+          hipparcosId: primaryId + 100000,
+          henryDraperId: primaryId + 200000,
+          harvardRevisedId: primaryId + 300000,
+          glieseId: `NCZ ${primaryId}`
+        },
+        properName: starIn.name || `Star ${primaryId}`,
+        type: "STAR",
+        primaryId,
+        nearbyObjectIDs: [primaryId],
+        rightAscensionRadians: mkValue("INFERRED", "RADIAN", raRad),
+        parsedStellarClassification: { mainClass },
+        cartesianCoordsInLys: { x: cx, y: cy, z: cz },
+        temperatureEstimate: mkValue("INFERRED", "K", tempK),
+        solDistance: mkValue("INFERRED", "LY", solDist),
+        links: {},
+        radius: mkValue("INFERRED", "LY", radiusLy),
+        declinationRadians: mkValue("INFERRED", "RADIAN", decRad),
+        rawStellarClassification: classToRaw(mainClass)
+      };
+    }
+
+    // ---- Planet generation ----
+
+    function makePlanetsForStar(starObj, starId, startPlanetId) {
+      const planets = [];
+      const numPlanets = randInt(1, 6); // at least 1
+
+      const letters = ["b","c","d","e","f","g","h","i"];
+      let nextA_AU = rand(0.05, 0.6); // starting semi-major axis in AU
+
+      for (let i = 0; i < numPlanets; i++) {
+        const letter = letters[i] || `p${i+1}`;
+
+        // Increase orbital distance each planet
+        nextA_AU *= rand(1.4, 2.2);
+
+        // Clamp somewhere reasonable
+        const aAU = Math.min(nextA_AU, 60);
+        const aLy = aAU * AU_LY;
+
+        // Kepler-ish period (years -> days). P^2 = a^3
+        const periodYears = Math.sqrt(aAU * aAU * aAU);
+        const periodDays = periodYears * 365.256363;
+
+        const e = rand(0, 0.35);
+        const bLy = aLy * Math.sqrt(1 - e*e);
+
+        // Pick a rough planet type bucket
+        const typeBucket = pick(["rocky", "ice", "gas"]);
+        let earthMasses, earthRadii, density;
+        if (typeBucket === "rocky") {
+          earthMasses = rand(0.2, 5);
+          earthRadii = rand(0.5, 1.8);
+          density = rand(3.0, 8.0);
+        } else if (typeBucket === "ice") {
+          earthMasses = rand(5, 25);
+          earthRadii = rand(2.0, 4.5);
+          density = rand(1.1, 3.0);
+        } else {
+          earthMasses = rand(25, 350);
+          earthRadii = rand(4.0, 12.0);
+          density = rand(0.4, 2.0);
+        }
+
+        const massKg = earthMasses * EARTH_MASS_KG;
+        const radiusLy = earthRadii * EARTH_RADIUS_LY;
+
+        const planetPrimaryId = startPlanetId + i;
+
+        planets.push({
+          starId: starId,
+          inclination: mkValue("INFERRED", "DEGREE_GEOM", rand(0, 10)),
+          orbitalPeriodDays: mkValue("INFERRED", "DAY", periodDays),
+          longAscendingNode: mkValue("INFERRED", "DEGREE_GEOM", rand(0, 360)),
+          semiMinorAxisLys: mkValue("INFERRED", "LY", bLy),
+          properName: `${starObj.properName} ${letter}`,
+          eccentricity: mkValue("INFERRED", "NONE", e),
+          type: "PLANET",
+          primaryId: planetPrimaryId,
+          axialTilt: mkValue("INFERRED", "DEGREE_GEOM", rand(0, 40)),
+          semiMajorAxisLys: mkValue("INFERRED", "LY", aLy),
+          name: {
+            planetLetter: letter,
+            starName: starObj.properName
+          },
+          radiusLys: mkValue("INFERRED", "LY", radiusLy),
+          densityGcc: mkValue("INFERRED", "G_PER_CC", density),
+          radius: mkValue("INFERRED", "LY", radiusLy),
+          massKg: mkValue("INFERRED", "KG", massKg, "Mass"),
+          argumentPeriapsis: mkValue("INFERRED", "DEGREE_GEOM", rand(0, 360))
+        });
+      }
+
+      return planets;
+    }
+
+    // ---- Build catalog ----
+
+    const grid = sectorJSON.grid || { width: 100, height: 100, depth: 100 };
+    const inputStars = Array.isArray(sectorJSON.stars) ? sectorJSON.stars : [];
+
+    const solStar = {
+      absoluteMagnitude: mkValue("SUPPLIED", "MV", 4.83),
+      identifiers: {
+        hipparcosId: "0",
+        henryDraperId: "0",
+        harvardRevisedId: "0",
+        glieseId: "Sol"
+      },
+      properName: "Sol",
+      type: "STAR",
+      primaryId: 1,
+      nearbyObjectIDs: [1],
+      rightAscensionRadians: mkValue("SUPPLIED", "RADIAN", 0),
+      parsedStellarClassification: { mainClass: "G" },
+      cartesianCoordsInLys: { x: 0, y: 0, z: 0 },
+      temperatureEstimate: mkValue("SUPPLIED", "K", 5778),
+      solDistance: mkValue("SUPPLIED", "LY", 0),
+      links: {},
+      radius: mkValue("SUPPLIED", "LY", R_SUN_LY / CORONA_SHRINK),
+      declinationRadians: mkValue("SUPPLIED", "RADIAN", 0),
+      rawStellarClassification: "G2V"
+    };
+
+    const maxDim = Math.max(grid.width, grid.height, grid.depth, 1);
+    const targetSpanLy = 140;
+    const scaleLyPerUnit = targetSpanLy / maxDim;
+
+    let starsOut = [solStar];
+    let planetsOut = [];
+
+    let nextStarId = 2;
+    let nextPlanetId = 100000; // large offset to avoid collisions with star IDs
+
+    // Add planets for Sol too (keeps exoplanet highlight logic happy)
+    planetsOut.push(...makePlanetsForStar(solStar, 1, nextPlanetId));
+    nextPlanetId += planetsOut.length;
+
+    for (let i = 0; i < inputStars.length; i++) {
+      const s = inputStars[i];
+      const starObj = makeStarFromGrid(s, nextStarId, grid, scaleLyPerUnit);
+      starsOut.push(starObj);
+
+      const newPlanets = makePlanetsForStar(starObj, nextStarId, nextPlanetId);
+      planetsOut.push(...newPlanets);
+      nextPlanetId += newPlanets.length;
+
+      nextStarId++;
+    }
+
+    const catalog = { stars: starsOut, planets: planetsOut };
+    return JSON.stringify(catalog);
   }
 
   // -----------------------------
@@ -989,6 +1530,9 @@
     finalBoxedImageURL = null;
     finalSelectedCropURL = null;
 
+    lastSectorJSON = null;
+    lastStarCatalogText = null;
+
     ftType.textContent = `Galaxy Type: ${currentGalaxyName}`;
     updateCountFooter();
   }
@@ -1081,7 +1625,7 @@
   }
 
   // -----------------------------
-  // Skeletons
+  // Skeletons / palettes (unchanged)
   // -----------------------------
   function SKEL_SPIRAL() {
     const arms = randi(2, 5);
@@ -1095,7 +1639,6 @@
       glowColor: "rgba(120,170,255,0.28)",
       generate(cx, cy, R) {
         const stars = [];
-
         for (let i = 0; i < coreN; i++) {
           const r = Math.pow(Math.random(), 0.45) * R * 0.35;
           const a = rand(0, Math.PI*2);
@@ -1103,21 +1646,17 @@
           const y = cy + Math.sin(a)*r + gauss(0, R*0.01);
           stars.push(star(x,y, rand(0.7, 1.6), rand(0.25,0.7), coreColor()));
         }
-
         for (let i = 0; i < armN; i++) {
           const armIndex = randi(0, arms-1);
           const rN = Math.pow(Math.random(), 0.62) * R;
           const baseAngle = (armIndex * (Math.PI*2/arms));
           const theta = baseAngle + rN * (twist / R) + gauss(0, armWidth);
           const spread = gauss(0, R*armWidth*0.6);
-
           const x = cx + Math.cos(theta)*rN + Math.cos(theta+Math.PI/2)*spread;
           const y = cy + Math.sin(theta)*rN + Math.sin(theta+Math.PI/2)*spread;
-
           const alpha = lerp(0.12, 0.75, 1 - rN/R);
           stars.push(star(x,y, rand(0.4, 1.2), alpha, armColor()));
         }
-
         for (let i = 0; i < 220; i++) {
           const rN = Math.pow(Math.random(), 0.9) * R * 1.1;
           const a = rand(0, Math.PI*2);
@@ -1129,7 +1668,6 @@
             "rgba(255,255,255,0.18)"
           ));
         }
-
         return stars;
       }
     };
@@ -1147,7 +1685,6 @@
       glowColor: "rgba(255,170,140,0.24)",
       generate(cx, cy, R) {
         const stars = [];
-
         const barN = randi(350, 520);
         for (let i = 0; i < barN; i++) {
           const t = gauss(0, 1);
@@ -1157,30 +1694,24 @@
           const y = cy + xLocal*Math.sin(barAng) + yLocal*Math.cos(barAng);
           stars.push(star(x,y, rand(0.6,1.4), rand(0.2,0.6), coreColor()));
         }
-
         for (let i = 0; i < 220; i++) {
           const rN = Math.pow(Math.random(), 0.5)*R*0.25;
           const a = rand(0, Math.PI*2);
           stars.push(star(cx+Math.cos(a)*rN, cy+Math.sin(a)*rN, rand(0.7,1.6), rand(0.25,0.7), coreColor()));
         }
-
         const armN = randi(900, 1300);
         for (let i = 0; i < armN; i++) {
           const armIndex = randi(0, arms-1);
           const rN = Math.pow(Math.random(), 0.62) * R;
           const endOffset = (armIndex%2===0 ? 1 : -1) * R*barLen*0.28;
-
           const armBase = barAng + (armIndex * (Math.PI*2/arms));
           const theta = armBase + rN*(twist/R) + gauss(0, armWidth);
           const spread = gauss(0, R*armWidth*0.6);
-
           const x = cx + endOffset*Math.cos(barAng) + Math.cos(theta)*rN + Math.cos(theta+Math.PI/2)*spread;
           const y = cy + endOffset*Math.sin(barAng) + Math.sin(theta)*rN + Math.sin(theta+Math.PI/2)*spread;
-
           const alpha = lerp(0.12, 0.7, 1 - rN/R);
           stars.push(star(x,y, rand(0.4,1.2), alpha, armColorWarm()));
         }
-
         return stars;
       }
     };
@@ -1195,29 +1726,23 @@
       generate(cx, cy, R) {
         const stars = [];
         const N = randi(1200, 1800);
-
         for (let i = 0; i < N; i++) {
           const rN = Math.pow(Math.random(), 0.45) * R;
           const a = rand(0, Math.PI*2);
           let x = Math.cos(a)*rN;
           let y = Math.sin(a)*rN*axisRatio;
-
           const xr = x*Math.cos(rot) - y*Math.sin(rot);
           const yr = x*Math.sin(rot) + y*Math.cos(rot);
-
           const ax = cx + xr + gauss(0, R*0.01);
           const ay = cy + yr + gauss(0, R*0.01);
           const alpha = lerp(0.12, 0.75, 1 - rN/R);
-
           stars.push(star(ax, ay, rand(0.5,1.5), alpha, coreColorCool()));
         }
-
         for (let i = 0; i < 260; i++) {
           const rN = Math.pow(Math.random(), 0.9)*R*1.05;
           const a = rand(0, Math.PI*2);
           stars.push(star(cx+Math.cos(a)*rN, cy+Math.sin(a)*rN, rand(0.3,0.9), rand(0.05,0.2), "rgba(255,255,255,0.18)"));
         }
-
         return stars;
       }
     };
@@ -1226,19 +1751,16 @@
   function SKEL_RING() {
     const ringRadius = rand(0.65, 0.8);
     const thickness = rand(0.06, 0.12);
-
     return {
       name: "Ring Galaxy",
       glowColor: "rgba(160,255,200,0.20)",
       generate(cx, cy, R) {
         const stars = [];
-
         for (let i = 0; i < 280; i++) {
           const rN = Math.pow(Math.random(), 0.5) * R * 0.22;
           const a = rand(0, Math.PI*2);
           stars.push(star(cx+Math.cos(a)*rN, cy+Math.sin(a)*rN, rand(0.7,1.6), rand(0.25,0.7), coreColor()));
         }
-
         const ringN = randi(1200, 1700);
         for (let i = 0; i < ringN; i++) {
           const rBase = R * ringRadius;
@@ -1247,10 +1769,8 @@
           const x = cx + Math.cos(a)*rN;
           const y = cy + Math.sin(a)*rN;
           const alpha = lerp(0.15, 0.55, 1 - Math.abs(rN - rBase)/(R*thickness*3));
-
           stars.push(star(x,y, rand(0.4,1.2), alpha, armColor()));
         }
-
         return stars;
       }
     };
@@ -1264,7 +1784,6 @@
       generate(cx, cy, R) {
         const stars = [];
         const centers = [];
-
         for (let i = 0; i < clumps; i++) {
           centers.push({
             x: cx + gauss(0, R*0.25),
@@ -1272,37 +1791,27 @@
             s: rand(0.08, 0.22)
           });
         }
-
         const N = randi(900, 1400);
         for (let i = 0; i < N; i++) {
           const c = centers[randi(0, centers.length-1)];
           const rN = Math.abs(gauss(0, R*c.s));
           const a = rand(0, Math.PI*2);
-
           const x = c.x + Math.cos(a)*rN;
           const y = c.y + Math.sin(a)*rN;
           const alpha = rand(0.12, 0.6);
-
           stars.push(star(x,y, rand(0.4,1.3), alpha, coreColorWarm()));
         }
-
         for (let i = 0; i < 220; i++) {
           const rN = Math.pow(Math.random(), 0.8) * R;
           const a = rand(0, Math.PI*2);
           stars.push(star(cx+Math.cos(a)*rN, cy+Math.sin(a)*rN, rand(0.3,0.9), rand(0.05,0.18), "rgba(255,255,255,0.18)"));
         }
-
         return stars;
       }
     };
   }
 
-  // -----------------------------
-  // Palettes
-  // -----------------------------
-  function star(x,y,size=1,alpha=0.5,color=null) {
-    return {x,y,size,alpha,color};
-  }
+  function star(x,y,size=1,alpha=0.5,color=null) { return {x,y,size,alpha,color}; }
   function coreColor() {
     const t = rand();
     if (t < 0.6) return `rgba(255,255,255,${rand(0.25,0.8)})`;
