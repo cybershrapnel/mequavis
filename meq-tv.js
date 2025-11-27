@@ -229,6 +229,25 @@
     </div>
   `;
 
+  // --- resize handle (bottom-right, only in popout mode) ---
+  const resizeHandle = document.createElement("div");
+  resizeHandle.id = "tvPanelResizeHandle";
+  resizeHandle.style.cssText = `
+    position:absolute;
+    width:12px;
+    height:12px;
+    right:0;
+    bottom:0;
+    cursor:se-resize;
+    background:var(--meq-accent, #0ff);
+    opacity:0.7;
+    border-top:1px solid #000;
+    border-left:1px solid #000;
+    box-sizing:border-box;
+    display:none;
+  `;
+  panel.appendChild(resizeHandle);
+
   document.body.appendChild(panel);
 
   const headerEl          = panel.querySelector("#tvPanelHeader");
@@ -272,7 +291,7 @@
 
     // If MV overlay is open, restyle it + its rows
     const container = document.getElementById(playerContainerId);
-    const overlay = container?.querySelector("#mvPlaylistOverlay");
+    const overlay = container && container.querySelector("#mvPlaylistOverlay");
     if (overlay) {
       overlay.style.borderLeftColor = accent;
       overlay.style.color = accent;
@@ -295,13 +314,15 @@
     }
 
     // MV wrapper borders that are already in DOM
-    const mvTitle = container?.querySelector("#mvTitle");
-    const mvAuthor = container?.querySelector("#mvAuthor");
-    if (mvTitle) mvTitle.style.borderBottomColor = accent;
-    if (mvAuthor) mvAuthor.style.borderTopColor = accent;
+    if (container) {
+      const mvTitle = container.querySelector("#mvTitle");
+      const mvAuthor = container.querySelector("#mvAuthor");
+      if (mvTitle) mvTitle.style.borderBottomColor = accent;
+      if (mvAuthor) mvAuthor.style.borderTopColor = accent;
 
-    const mvAudioHolder = container?.querySelector("#mvAudioHolder");
-    if (mvAudioHolder) mvAudioHolder.style.borderTopColor = accent;
+      const mvAudioHolder = container.querySelector("#mvAudioHolder");
+      if (mvAudioHolder) mvAudioHolder.style.borderTopColor = accent;
+    }
   }
 
   setInterval(applyAccentEverywhere, 300);
@@ -471,7 +492,7 @@
     if (mvVideoEl) {
       try { mvVideoEl.pause(); } catch (e) {}
       mvVideoEl.src = "";
-      mvVideoEl.load?.();
+      mvVideoEl.load && mvVideoEl.load();
       mvVideoEl = null;
     }
     const container = document.getElementById(playerContainerId);
@@ -583,7 +604,7 @@
   // ----- MV PLAYLIST OVERLAY -----
   function removeMusicOverlay() {
     const container = document.getElementById(playerContainerId);
-    const overlay = container?.querySelector("#mvPlaylistOverlay");
+    const overlay = container && container.querySelector("#mvPlaylistOverlay");
     if (overlay) overlay.remove();
     mvOverlayOpen = false;
   }
@@ -660,7 +681,7 @@
           text-overflow:ellipsis;
           box-sizing:border-box;
         `;
-        row.textContent = entry.title || `(untitled ${idx+1})`;
+        row.textContent = entry.title || ("(untitled " + (idx + 1) + ")");
         row.addEventListener("click", () => {
           mvOverlayOpen = false;
           currentMusicIndex = idx;
@@ -671,7 +692,9 @@
       });
     }
 
-    closeOverlayBtn?.addEventListener("click", removeMusicOverlay);
+    if (closeOverlayBtn) {
+      closeOverlayBtn.addEventListener("click", removeMusicOverlay);
+    }
 
     const wrapper = container.querySelector("#musicVideoWrapper");
     if (wrapper) {
@@ -833,18 +856,28 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 3.5) POPOUT + DRAG LOGIC
+  // 3.5) POPOUT + DRAG + RESIZE LOGIC
   // ---------------------------------------------------------------------------
   let isDragging = false;
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   let poppedOut   = false;
 
+  // resize state
+  let isResizing = false;
+  let resizeStartX = 0;
+  let resizeStartY = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+  const MIN_WIDTH = 320;
+  const MIN_HEIGHT = 240;
+
   function onMouseDownHeader(e) {
     if (!poppedOut) return;
     e.preventDefault();
     const rect = panel.getBoundingClientRect();
     isDragging = true;
+    isResizing = false;
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
 
@@ -854,17 +887,51 @@
     panel.style.bottom = "auto";
   }
 
+  function onResizeMouseDown(e) {
+    if (!poppedOut) return;
+    e.preventDefault();
+    const rect = panel.getBoundingClientRect();
+
+    isResizing = true;
+    isDragging = false;
+
+    resizeStartX = e.clientX;
+    resizeStartY = e.clientY;
+    startWidth = rect.width;
+    startHeight = rect.height;
+
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    panel.style.width = rect.width + "px";
+    panel.style.height = rect.height + "px";
+  }
+
   function onMouseMove(e) {
-    if (!isDragging) return;
-    panel.style.left = (e.clientX - dragOffsetX) + "px";
-    panel.style.top  = (e.clientY - dragOffsetY) + "px";
+    if (isDragging) {
+      panel.style.left = (e.clientX - dragOffsetX) + "px";
+      panel.style.top  = (e.clientY - dragOffsetY) + "px";
+    } else if (isResizing) {
+      const dx = e.clientX - resizeStartX;
+      const dy = e.clientY - resizeStartY;
+
+      let newWidth  = startWidth + dx;
+      let newHeight = startHeight + dy;
+
+      if (newWidth < MIN_WIDTH) newWidth = MIN_WIDTH;
+      if (newHeight < MIN_HEIGHT) newHeight = MIN_HEIGHT;
+
+      panel.style.width  = newWidth + "px";
+      panel.style.height = newHeight + "px";
+    }
   }
 
   function onMouseUp() {
     isDragging = false;
+    isResizing = false;
   }
 
   if (headerEl) headerEl.addEventListener("mousedown", onMouseDownHeader);
+  if (resizeHandle) resizeHandle.addEventListener("mousedown", onResizeMouseDown);
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 
@@ -887,6 +954,10 @@
     let extraHeight = 100;
     if (isMusicVideosMode) extraHeight += 200;
     panel.style.height = newHeight + extraHeight + "px";
+
+    if (resizeHandle) {
+      resizeHandle.style.display = "block";
+    }
 
     if (popoutBtn) {
       popoutBtn.style.display = "none";
@@ -913,6 +984,10 @@
     panel.style.width  = "";
     panel.style.height = "";
     poppedOut = false;
+
+    if (resizeHandle) {
+      resizeHandle.style.display = "none";
+    }
 
     isExternalViewActive = false;
     exitMusicVideosMode();
