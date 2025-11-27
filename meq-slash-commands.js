@@ -17,7 +17,8 @@
   const PRIMARY_COMMANDS = [
     { name: "eve",   label: "/eve",   desc: "Talk to eve persona" },
     { name: "help",  label: "/help",  desc: "Show help / tips" },
-    { name: "auto",  label: "/auto",  desc: "Toggle auto mode" }
+    { name: "auto",  label: "/auto",  desc: "Toggle auto mode" },
+  { name: "api",   label: "/api",   desc: "Set API key for this page" }
   ];
 
   const EXTRA_COMMANDS = [
@@ -277,11 +278,26 @@
   // ---------------------------------------------------------------------------
   // SLASH COMMAND HANDLER + MeqChat.send PATCH
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // SLASH COMMAND HANDLER + MeqChat.send PATCH
+  // ---------------------------------------------------------------------------
+
+  // Simple system logger
+  function pushSystemMessage(text) {
+    if (typeof window.appendAIMessage === "function") {
+      window.appendAIMessage("System", String(text));
+    } else {
+      console.log("[System]", text);
+    }
+  }
 
   // NEW helper: push text into Eve talk memory
   function injectIntoEveTalk(text) {
     try {
-      if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
+      if (
+        window.meqEveOverlay &&
+        typeof window.meqEveOverlay.setSpeechText === "function"
+      ) {
         window.meqEveOverlay.setSpeechText(text);
       } else {
         window.EVE_SPEECH_TEXT = String(text || "");
@@ -300,24 +316,60 @@
     const cmd = (parts[0] || "").toLowerCase();
     const argsText = parts.slice(1).join(" ");
 
+    // 🔹 SPECIAL CASE: /api is handled entirely on the frontend
+    if (cmd === "api") {
+      // Force reset first so the modal always appears
+      if (typeof window.meqClearApiKey === "function") {
+        window.meqClearApiKey();
+      }
+
+      if (typeof window.meqEnsureApiKey === "function") {
+        try {
+          await window.meqEnsureApiKey();
+          pushSystemMessage("API key updated for this page.");
+        } catch (err) {
+          pushSystemMessage("API key entry cancelled.");
+        }
+      } else {
+        pushSystemMessage("API key helper not available on this page.");
+      }
+
+      // Do NOT call slash-proxy.php for /api
+      return null;
+    }
+
     let reply = "";
     let meta  = null;
 
+    // Current session from frontend
+    const currentSessionId =
+      window.MeqChat && typeof window.MeqChat.getCurrentSessionId === "function"
+        ? window.MeqChat.getCurrentSessionId()
+        : null;
+
+    // Optional per-page API key (set by /auto or /api helper)
+    const userApiKey =
+      typeof window.userapikey === "string"
+        ? window.userapikey.trim()
+        : "";
+
     try {
-      const currentSessionId =
-        window.MeqChat && typeof window.MeqChat.getCurrentSessionId === "function"
-          ? window.MeqChat.getCurrentSessionId()
-          : null;
+      const body = {
+        command: cmd,
+        text: argsText,
+        raw: trimmed,
+        session_id: currentSessionId || ""
+      };
+
+      // Only send key if present
+      if (userApiKey) {
+        body.userapikey = userApiKey;
+      }
 
       const res = await fetch(SLASH_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          command: cmd,
-          text: argsText,
-          raw: trimmed,
-          session_id: currentSessionId || ""
-        })
+        body: JSON.stringify(body)
       });
 
       if (!res.ok) {
@@ -348,7 +400,7 @@
       window.appendAIMessage(senderLabel, reply);
     }
 
-    // ✅ NEW: if this was /eve, also inject into Eve talk memory
+    // If this was /eve, also inject into Eve talk memory
     if (cmd === "eve") {
       injectIntoEveTalk(reply);
     }
@@ -366,7 +418,7 @@
     window.MeqChat.send = async function (userText) {
       const text = typeof userText === "string" ? userText : "";
       if (text.trim().startsWith("/")) {
-        // Route through slash endpoint instead of normal AI proxy
+        // Route through slash handler instead of normal AI proxy
         return handleSlashCommand(text);
       }
       // Normal chat path
@@ -377,3 +429,4 @@
   // Wait until everything is loaded so MeqChat exists
   window.addEventListener("load", patchMeqChatSend);
 })();
+
