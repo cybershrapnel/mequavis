@@ -293,3 +293,115 @@
     });
   }
 })();
+
+
+
+// 🔁 Auto-boot Digital Skybox, set custom URL, then try to click "Embed"
+(function () {
+  // 👉 Put your desired URL here:
+  const SKYBOX_AUTO_URL = "https://skybox.nanocheeze.com/skybox.html#https://xtdevelopment.net/chat-proxy/starmaps/Galactic-Sector-7.txt";
+
+  const MAX_WAIT_MS = 10000; // give it up to 10 seconds to find stuff
+  const startTime   = performance.now();
+
+  function findMapButton() {
+    const byAction = document.querySelector('.action-btn[data-action="map-ui"]');
+    if (byAction) return byAction;
+
+    const candidates = Array.from(
+      document.querySelectorAll("button, .action-btn, input[type='button'], input[type='submit']")
+    );
+    for (const el of candidates) {
+      const txt = (el.textContent || el.value || "").trim().toUpperCase();
+      if (txt === "SHOW MAP UI" || txt === "SHOW DIGITAL SKYBOX") {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function findHostEmbedButton() {
+    return Array.from(
+      document.querySelectorAll("button, .action-btn, input[type='button'], input[type='submit'], a")
+    ).find(el => {
+      const txt = (el.textContent || el.value || "").toUpperCase();
+      return txt.includes("EMBED");
+    }) || null;
+  }
+
+  function findIframeEmbedButton(iframe) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!doc) return null;
+      return Array.from(
+        doc.querySelectorAll("button, input[type='button'], input[type='submit'], a")
+      ).find(el => {
+        const txt = (el.textContent || el.value || "").toUpperCase();
+        return txt.includes("EMBED");
+      }) || null;
+    } catch (e) {
+      // cross-origin → can't reach inside
+      return null;
+    }
+  }
+
+  function doAutoBoot() {
+    const elapsed = performance.now() - startTime;
+    if (elapsed > MAX_WAIT_MS) {
+      console.warn("[auto-skybox] timed out waiting for mapBtn / skyboxFrame");
+      return;
+    }
+
+    const mapBtn = findMapButton();
+    const iframe = document.getElementById("skyboxFrame");
+
+    if (!mapBtn || !iframe) {
+      // Not ready yet, try again in a bit
+      setTimeout(doAutoBoot, 250);
+      return;
+    }
+
+    console.log("[auto-skybox] found mapBtn + skyboxFrame, kicking sequence…");
+
+    // 1) Open the panel (this triggers meq-skybox's lazy-loader)
+    mapBtn.click();
+
+    // 2) After openPanel has run and possibly set data-src, override with our URL
+    setTimeout(() => {
+      try {
+        iframe.src = SKYBOX_AUTO_URL;
+        console.log("[auto-skybox] iframe.src set →", SKYBOX_AUTO_URL);
+      } catch (e) {
+        console.warn("[auto-skybox] unable to set iframe src", e);
+      }
+    }, 400);
+
+    // 3) After some extra delay, try to click an "Embed" button
+    setTimeout(() => {
+      // First, see if host page has an Embed button
+      const hostEmbed = findHostEmbedButton();
+      if (hostEmbed) {
+        hostEmbed.click();
+        console.log("[auto-skybox] clicked host-page Embed button");
+        return;
+      }
+
+      // If not, try inside iframe (only if same-origin)
+      const iframeEmbed = findIframeEmbedButton(iframe);
+      if (iframeEmbed) {
+        iframeEmbed.click();
+        console.log("[auto-skybox] clicked iframe Embed button");
+      } else {
+        console.log("[auto-skybox] no Embed button found on host or inside iframe");
+      }
+    }, 1200);
+  }
+
+  // Fire after DOM is up; the retry loop handles panel creation timing
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(doAutoBoot, 300);
+  } else {
+    window.addEventListener("DOMContentLoaded", () => setTimeout(doAutoBoot, 300));
+  }
+})();
+
