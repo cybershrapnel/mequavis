@@ -946,7 +946,17 @@ function drawLockOverlays() {
     }
 
     if (lockIconImg.naturalWidth > 0) {
-      ctx.drawImage(lockIconImg, ix, iy, iconSz, iconSz);
+      // --- draw lock icons, keeping them white even in Anti mode ---
+if (lockIconImg.naturalWidth > 0) {
+  ctx.save();
+  if (window._meqFractalAnti) {
+    // cancel global invert for just this image
+    ctx.filter = "invert(1)";
+  }
+  ctx.drawImage(lockIconImg, ix, iy, iconSz, iconSz);
+  ctx.restore();
+}
+
     }
   }
 }
