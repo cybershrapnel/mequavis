@@ -872,70 +872,103 @@ modelSelect.style.width = "180px";
   // ---------------------------------------------------------------------------
   // PUBLIC SEND ENTRYPOINT
   // ---------------------------------------------------------------------------
-  async function send(userText) {
-    const { provider, model } = getCurrentModel();
+  // ---------------------------------------------------------------------------
+// PUBLIC SEND ENTRYPOINT
+// ---------------------------------------------------------------------------
+async function send(userText, opts) {
+  const { provider, model } = getCurrentModel();
 
-    state.messages.push({ role: "user", content: userText });
-
-    const reply = await callPhpProxy(provider, model, state.messages);
-
-    state.messages.push({ role: "assistant", content: reply });
-
-    let label;
-    if (provider === "openai") label = `OpenAI (${model})`;
-    else if (provider === "gemini") label = `Gemini (${model})`;
-    else label = provider.toUpperCase();
-
-    try {
-      if (window.meqEveOverlay && typeof window.meqEveOverlay.setSpeechText === "function") {
-        window.meqEveOverlay.setSpeechText(reply);
-      } else {
-        window.EVE_SPEECH_TEXT = reply;
-      }
-    } catch (e) {
-      console.warn("Failed to set Eve speech text:", e);
-    }
-
-    streamAIReply(label, reply);
+  // ✅ If /auto (or anything else) passes a userapikey, sync it to window
+  if (
+    opts &&
+    typeof opts.userapikey === "string" &&
+    opts.userapikey.trim().length
+  ) {
+    window.userapikey = opts.userapikey.trim();
   }
+
+  state.messages.push({ role: "user", content: userText });
+
+  const reply = await callPhpProxy(provider, model, state.messages);
+
+  state.messages.push({ role: "assistant", content: reply });
+
+  let label;
+  if (provider === "openai") label = `OpenAI (${model})`;
+  else if (provider === "gemini") label = `Gemini (${model})`;
+  else label = provider.toUpperCase();
+
+  try {
+    if (
+      window.meqEveOverlay &&
+      typeof window.meqEveOverlay.setSpeechText === "function"
+    ) {
+      window.meqEveOverlay.setSpeechText(reply);
+    } else {
+      window.EVE_SPEECH_TEXT = reply;
+    }
+  } catch (e) {
+    console.warn("Failed to set Eve speech text:", e);
+  }
+
+  streamAIReply(label, reply);
+}
+
 
   // ---------------------------------------------------------------------------
   // CALL PHP BACKEND (CHAT + LOGGING)
   // ---------------------------------------------------------------------------
-  async function callPhpProxy(provider, model, messages) {
-    try {
-      const res = await fetch("https://xtdevelopment.net/chat-proxy/chat-proxy.php", {
+async function callPhpProxy(provider, model, messages) {
+  try {
+    const payload = {
+      action: "chat",
+      provider,
+      model,
+      session_id: currentSessionId,
+      messages
+    };
+
+    // ✅ attach key if known
+    if (
+      typeof window.userapikey === "string" &&
+      window.userapikey.trim().length
+    ) {
+      payload.userapikey = window.userapikey.trim();
+    }
+
+    // Debug: verify the key is really in the outgoing JSON
+    console.log("callPhpProxy payload:", payload);
+
+    const res = await fetch(
+      "https://xtdevelopment.net/chat-proxy/chat-proxy.php",
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "chat",
-          provider,
-          model,
-          session_id: currentSessionId,
-          messages
-        })
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        return `[Proxy error ${res.status}]: ${txt}`;
+        body: JSON.stringify(payload),
       }
+    );
 
-      const data = await res.json();
-
-      if (data.session_id) {
-        currentSessionId        = data.session_id;
-        currentSessionCreatedAt = data.created_at || currentSessionCreatedAt;
-        const ownerFlag         = !!data.owner;
-        upsertSession(currentSessionId, currentSessionCreatedAt, ownerFlag);
-        renderSessionList();
-      }
-
-      return data.reply || "[Empty reply from proxy]";
-    } catch (err) {
-      return "[Network error: " + err.message + "]";
+    if (!res.ok) {
+      const txt = await res.text();
+      return `[Proxy error ${res.status}]: ${txt}`;
     }
+
+    const data = await res.json();
+
+    if (data.session_id) {
+      currentSessionId = data.session_id;
+      currentSessionCreatedAt = data.created_at || currentSessionCreatedAt;
+      const ownerFlag = !!data.owner;
+      upsertSession(currentSessionId, currentSessionCreatedAt, ownerFlag);
+      renderSessionList();
+    }
+
+    return data.reply || "[Empty reply from proxy]";
+  } catch (err) {
+    return "[Network error: " + err.message + "]";
   }
+}
+
 
   // ---------------------------------------------------------------------------
   // SMALL MARKDOWN-ISH FORMATTER
