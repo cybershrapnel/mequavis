@@ -1203,6 +1203,7 @@ async function callPhpProxy(provider, model, messages) {
           <p><img src="ncz.png"></p>
           <p>MEQUA News:</p>
           <p>Gemini 2.0 Flash model is active for use.</p>
+<p>the /auto command is available for use via your own API key! enjoy... :)<br />Just type /auto followed by a base prompt.</p>
         </div>
       </div>
     `;
