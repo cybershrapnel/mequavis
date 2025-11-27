@@ -683,6 +683,76 @@
     }
 
     setupControls();
+
+(function () {
+  // 🔹 Pin the top flex header bar & make it click-through
+  const flexBar = [...document.querySelectorAll("div")].find(el => {
+    const cs = getComputedStyle(el);
+    return (
+      cs.display === "flex" &&
+      cs.justifyContent === "space-between" &&
+      cs.alignItems === "center" &&
+      el.getBoundingClientRect().top < 150
+    );
+  });
+
+  if (flexBar) {
+    flexBar.style.position = "fixed";
+    flexBar.style.top = "0px";
+    flexBar.style.left = "400px";
+    flexBar.style.right = "0px";
+    flexBar.style.justifyContent = "right";
+    flexBar.style.pointerEvents = "none"; // click-through
+    console.log("✅ flex header bar pinned & click-through");
+  }
+
+  // 🔹 Lock mandelInfo at top-center, non-interactive
+  const info = document.getElementById("mandelInfo");
+  if (info) {
+    info.style.setProperty("position", "fixed", "important");
+    info.style.setProperty("top", "30px", "important");
+    info.style.setProperty("left", "50%", "important");
+    info.style.setProperty("transform", "translateX(-50%)", "important");
+    info.style.setProperty("margin", "0", "important");
+    info.style.setProperty("text-align", "center", "important");
+    info.style.setProperty("background", "rgba(0,0,0,0.3)", "important");
+    info.style.setProperty("padding", "2px 8px", "important");
+    info.style.setProperty("border-radius", "4px", "important");
+    info.style.setProperty("pointer-events", "none", "important"); // click-through
+    console.log("✅ mandelInfo anchored & click-through");
+  }
+
+  // 🔹 Center mandelCanvas dead-even on screen, no border
+  const mandelCanvas = document.getElementById("mandelCanvas");
+  if (mandelCanvas) {
+    function centerMandel() {
+      mandelCanvas.style.setProperty("position", "fixed", "important");
+      mandelCanvas.style.setProperty("top", "50%", "important");
+      mandelCanvas.style.setProperty("left", "50%", "important");
+      mandelCanvas.style.setProperty("transform", "translate(-50%, -50%)", "important");
+      mandelCanvas.style.setProperty("margin", "0", "important");
+      mandelCanvas.style.setProperty("pointer-events", "auto", "important");
+      // explicitly kill any border we might have added earlier
+      mandelCanvas.style.setProperty("border", "none", "important");
+    }
+
+    centerMandel();
+    window.addEventListener("resize", centerMandel);
+
+    console.log("✅ mandelCanvas centered dead-even, no border");
+  }
+
+  // 🔹 Keep Mandelbrot control buttons clickable
+  ["mandelNext", "mandelDownload", "mandelPlay", "mandelClose"].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.style.pointerEvents = "auto";
+      console.log(`✅ ${id} still clickable`);
+    }
+  });
+})();
+
+
     return true;
   }
 
