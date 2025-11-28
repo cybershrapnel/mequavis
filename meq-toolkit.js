@@ -292,7 +292,9 @@
     inp.style.fontSize = "10px";
     inp.style.boxSizing = "border-box";
     inp.style.outline = "none";
+    inp.style.width = "50px";   // <<< add this
   }
+
 
   function applyAccent() {
     const accent = getUIAccent();
@@ -335,15 +337,19 @@
       bg:"#111", fg:accent, border:accent,
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
+
+    // CLR = red border + red text
     styleButton(clearBtn, accent, hoverBg, {
-      bg:"#111", fg:accent, border:accent,
+      bg:"#111", fg:"#f00", border:"#f00",
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
-    // CALL text always black (not UI accent)
+
+    // CALL = green border + green text (background stays dark)
     styleButton(callBtn, accent, hoverBg, {
-      bg:"#111", fg:"#000", border:accent,
+      bg:"#111", fg:"#0f0", border:"#0f0",
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
+
 
 
     // keypad digits + rings (force important so CSS can't override)
