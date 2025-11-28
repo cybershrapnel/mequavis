@@ -194,10 +194,48 @@ function addThreePanelButtonsAll_v3() {
   }
 
 
+
+  let restoreBtn = null;
+
+  function showRestoreButton() {
+    if (restoreBtn) {
+      restoreBtn.style.display = "block";
+      return;
+    }
+
+    restoreBtn = document.createElement("button");
+    restoreBtn.textContent = "OPEN CHAT";
+    restoreBtn.style.position = "fixed";
+    restoreBtn.style.left = "50%";
+    restoreBtn.style.bottom = "100px";
+    restoreBtn.style.transform = "translateX(-50%)";
+    restoreBtn.style.zIndex = "10000";
+    restoreBtn.style.padding = "6px 16px";
+    restoreBtn.style.borderRadius = "999px";
+    restoreBtn.style.border = "none";
+    restoreBtn.style.fontSize = "14px";
+
+    restoreBtn.addEventListener("click", () => {
+      if (chatPanel) {
+        chatPanel.style.display = "block";
+      }
+      // keep left/info hidden; user can bring them back with the toolbar if they want
+      restoreBtn.style.display = "none";
+      fixRightMiddleMobile();
+    });
+
+    document.body.appendChild(restoreBtn);
+  }
+
+
+
+
+
   function hideAllPanels() {
     if (leftPanel)  leftPanel.style.display = "none";
     if (chatPanel)  chatPanel.style.display = "none";
     if (infoPanel)  infoPanel.style.display = "none";
+  showRestoreButton(); // <<--- add this
   }
 
   function setPanelState(panel, active, isRightPanel) {
