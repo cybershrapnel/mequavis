@@ -337,7 +337,12 @@ function addThreePanelButtonsAll_v3() {
     const ua = navigator.userAgent || "";
     const smallViewport = Math.min(window.innerWidth, window.innerHeight) <= 1000;
     const uaMatch = /Mobi|Android|iPhone|iPod/i.test(ua);
-    return uaMatch || smallViewport;
+    const hasTouch =
+      ("ontouchstart" in window) ||
+      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+
+    return (uaMatch || smallViewport) && hasTouch;
+
   }
 
   if (!isPhoneDevice()) {
