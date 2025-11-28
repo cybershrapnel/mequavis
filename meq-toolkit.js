@@ -339,10 +339,12 @@
       bg:"#111", fg:accent, border:accent,
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
+    // CALL text always black (not UI accent)
     styleButton(callBtn, accent, hoverBg, {
-      bg:"#111", fg:accent, border:accent,
+      bg:"#111", fg:"#000", border:accent,
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
+
 
     // keypad digits + rings (force important so CSS can't override)
     const keypadBtns = padEl ? padEl.querySelectorAll("button") : [];
