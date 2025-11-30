@@ -7,8 +7,8 @@
 // ADDED: Upload Dial Log -> read txt file, feed digits directly to nofurs handlers.
 //
 // UI UPDATE:
-//  - All borders / text / buttons / inputs / keypad use the live UI picker accent.
-//  - Keypad digit color is forced with !important to beat any CSS overrides.
+//  - All borders / text / buttons / inputs / keypad rings use the live UI picker accent.
+//  - Keypad digit text is forced to solid black with !important (for readability).
 //  - Canvas / dialing behavior untouched.
 
 (function () {
@@ -292,9 +292,8 @@
     inp.style.fontSize = "10px";
     inp.style.boxSizing = "border-box";
     inp.style.outline = "none";
-    inp.style.width = "50px";   // <<< add this
+    inp.style.width = "50px";
   }
-
 
   function applyAccent() {
     const accent = getUIAccent();
@@ -350,24 +349,32 @@
       flex:"1", padding:"3px 4px", fontSize:"11px", weight:"bold"
     });
 
-
-
-    // keypad digits + rings (force important so CSS can't override)
+    // keypad digits + rings
     const keypadBtns = padEl ? padEl.querySelectorAll("button") : [];
     keypadBtns.forEach((b) => {
-      b.style.setProperty("color", accent, "important");
+      // Ring uses accent, text is ALWAYS solid black
+      b.style.setProperty("color", "#000", "important");
       b.style.setProperty("border-color", accent, "important");
 
-      // subtle accent glow, keep metal background
+      // Keep the metal + accent glow
       b.style.boxShadow =
-        `inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${accent}55`;
-  b.style.textShadow =
-    `-1px -1px 0 #000,
-      1px -1px 0 #000,
-     -1px  1px 0 #000,
-      1px  1px 0 #000,
-      0 0 4px ${accent}55`;
+        `inset 0 0 2px #000,
+         0 0 4px rgba(0,0,0,0.8),
+         0 0 6px ${accent}55`;
 
+      // Black outline + soft accent glow
+      b.style.setProperty(
+        "text-shadow",
+        `-1px -1px 0 #000,
+          1px -1px 0 #000,
+         -1px  1px 0 #000,
+          1px  1px 0 #000,
+          0 0 4px ${accent}55`,
+        "important"
+      );
+
+      // Extra safety for some browsers
+      b.style.setProperty("-webkit-text-stroke", "0px #000", "important");
     });
 
     if (displayEl) {
@@ -447,16 +454,17 @@
       background: radial-gradient(circle at 30% 20%, #666 0, #333 40%, #111 100%);
       border: 1px solid ${initialAccent};
       border-radius: 50%;
-      color:${initialAccent};
+      color:#000;
       font-size:14px;
       text-shadow:-1px -1px 0 #000,
                   1px -1px 0 #000,
                  -1px  1px 0 #000,
                   1px  1px 0 #000,
                   0 0 4px ${initialAccent}55;
-
       cursor:pointer;
-      box-shadow: inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${initialAccent}55;
+      box-shadow: inset 0 0 2px #000,
+                  0 0 4px rgba(0,0,0,0.8),
+                  0 0 6px ${initialAccent}55;
     `;
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -482,7 +490,7 @@
     padEl.appendChild(btn);
   });
 
-  // recolor keypad NOW that they exist
+  // recolor keypad NOW that they exist (and force black text)
   applyAccent();
 
   // 4) Dialer controls (local display)
