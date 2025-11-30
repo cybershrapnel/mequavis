@@ -361,7 +361,13 @@
       // subtle accent glow, keep metal background
       b.style.boxShadow =
         `inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${accent}55`;
-      b.style.textShadow = `0 0 3px #000, 0 0 4px ${accent}44`;
+  b.style.textShadow =
+    `-1px -1px 0 #000,
+      1px -1px 0 #000,
+     -1px  1px 0 #000,
+      1px  1px 0 #000,
+      0 0 4px ${accent}55`;
+
     });
 
     if (displayEl) {
@@ -443,7 +449,12 @@
       border-radius: 50%;
       color:${initialAccent};
       font-size:14px;
-      text-shadow:0 0 3px #000, 0 0 4px ${initialAccent}44;
+      text-shadow:-1px -1px 0 #000,
+                  1px -1px 0 #000,
+                 -1px  1px 0 #000,
+                  1px  1px 0 #000,
+                  0 0 4px ${initialAccent}55;
+
       cursor:pointer;
       box-shadow: inset 0 0 2px #000, 0 0 4px rgba(0,0,0,0.8), 0 0 6px ${initialAccent}55;
     `;
