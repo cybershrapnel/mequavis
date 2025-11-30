@@ -368,6 +368,9 @@ function downloadSegmentLog() {
 let gasket = 1;
 let gasketPower = 1;
 const GASKET_MAX = 17;
+// 🔁 expose to other scripts (like meq-room-chat.js)
+window.gasket = gasket;
+window.gasketPower = gasketPower;
 
 // Render the segment history into the left panel WITHOUT nuking other children
 function updateSegmentLog() {
@@ -558,7 +561,9 @@ canvas.addEventListener("click", e => {
             gasketPower++;
           }
         }
-
+// 🔁 keep window in sync for other scripts
+window.gasket = gasket;
+window.gasketPower = gasketPower;
         activeLayers = pyramidLayers;
         omniverseAddress = "";
       }
