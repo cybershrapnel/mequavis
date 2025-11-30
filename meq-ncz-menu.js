@@ -273,7 +273,7 @@
     // 🔗 Per-button URLs – tweak these as needed
     const NCZ_URL_CERT     = "https://certification.nanocheeze.com/";
     const NCZ_URL_UPLOAD   = "https://info.nanocheeze.com";
-    const NCZ_URL_EXPLORER = "https://explorer.nanocheeze.com";
+    const NCZ_URL_EXPLORER = "https://xtdevelopment.net/blocks";
     const NCZ_URL_WALLET   = "https://wallet.nanocheeze.com/";
 
     function openNczPanel(title, url) {
