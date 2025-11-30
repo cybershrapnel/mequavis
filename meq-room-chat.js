@@ -16,6 +16,16 @@
   let lastGasketKey     = null;  // "GASKET_POWER_1", "GASKET_POWER_2", ...
   let lastPollIndex     = 0;     // index for incremental polling
   let pollTimerId       = null;
+let lastLocalSent = null;
+let lastSystemLocalSent = null; // optional, for NCZ system echo
+
+  // Separate NCZ system room (global, not per gasket)
+  const SYSTEM_SEGMENT_KEY = "GASKET_POWER_0";  // fixed segment address for system events
+
+  let systemRoomId        = null;  // UUID from server for system room
+  let systemLastPollIndex = 0;     // index for incremental polling (system)
+  let systemPollTimerId   = null;
+
 
   // DOM refs
   let headerEl            = null;
@@ -47,12 +57,26 @@
   // GASKET POWER HELPERS
   // ---------------------------------------------------------------------------
 
-  function getGasketPower() {
-    if (typeof gasketPower === "number" && isFinite(gasketPower) && gasketPower > 0) {
-      return Math.floor(gasketPower);
-    }
-    return 1;
+function isNoCooldownRoom() {
+  return getGasketPower() === 0;
+}
+
+function getGasketPower() {
+  // Prefer the canvas-exposed window.gasketPower
+  if (typeof window.gasketPower === "number" && isFinite(window.gasketPower)) {
+    return Math.floor(window.gasketPower); // can be 0, 1, 2, ...
   }
+
+  // optional: also check the "current" alias you set in drawTitle, just in case
+  if (typeof window.gasketPowerCurrent === "number" && isFinite(window.gasketPowerCurrent)) {
+    return Math.floor(window.gasketPowerCurrent);
+  }
+
+  // fallback
+  return 1;
+}
+
+
 
   function getGasketAddressKey() {
     const gp = getGasketPower();
@@ -124,6 +148,48 @@
     }
   }
 
+
+  // ---------------------------------------------------------------------------
+  // SYSTEM ROOM MAPPING: fixed segment → room UUID (handled by chat.php)
+  // ---------------------------------------------------------------------------
+  async function ensureSystemRoomMapping() {
+    if (systemRoomId) return;
+
+    try {
+      const res = await fetch(ROOM_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "map_segment",
+          segment_address: SYSTEM_SEGMENT_KEY
+        })
+      });
+
+      if (!res.ok) {
+        console.error("system map_segment HTTP error", res.status);
+        appendToMainChat("System", "System chat room mapping failed (" + res.status + ").");
+        return;
+      }
+
+      const data = await res.json();
+      systemRoomId = data.room_id || null;
+
+      if (!systemRoomId) {
+        appendToMainChat("System", "System chat mapping returned no room_id.");
+      }
+
+      if (typeof data.next_index === "number") {
+        systemLastPollIndex = data.next_index;
+      } else {
+        systemLastPollIndex = 0;
+      }
+    } catch (err) {
+      console.error("system map_segment exception", err);
+      appendToMainChat("System", "Error mapping system chat room: " + err.message);
+    }
+  }
+
+
   // ---------------------------------------------------------------------------
   // SEND BUTTON COOLDOWN LOGIC
   // ---------------------------------------------------------------------------
@@ -165,31 +231,42 @@
   // SEND CHAT MESSAGE TO ROOM
   // ---------------------------------------------------------------------------
   async function sendRoomMessage() {
-    if (!messageInputEl) return;
+  if (!messageInputEl) return;
 
-    if (sendCooldownActive) {
-      return;
-    }
+  // ❌ block only if cooldown is active AND this is NOT gasket 0
+  if (sendCooldownActive && !isNoCooldownRoom()) {
+    return;
+  }
 
-    const nameRaw  = (usernameInputEl && usernameInputEl.value) || "";
-    const username = nameRaw.trim() || "Anon";
+  const nameRaw  = (usernameInputEl && usernameInputEl.value) || "";
+  const username = nameRaw.trim() || "Anon";
 
-    const textRaw = messageInputEl.value || "";
-    const text    = textRaw.trim();
-    if (!text) return;
+  const textRaw = messageInputEl.value || "";
+  const text    = textRaw.trim();
+  if (!text) return;
 
+  // ❌ don't start cooldown if gasket 0
+  if (!isNoCooldownRoom()) {
     startSendCooldown();
+  }
 
-    await ensureRoomMapping();
+  await ensureRoomMapping();
 
-    if (!currentRoomId) {
-      appendToMainChat("System", "No active gasket power room; message not sent.");
-      return;
-    }
+  if (!currentRoomId) {
+    appendToMainChat("System", "No active gasket power room; message not sent.");
+    return;
+  }
 
-    appendToMainChat(username, text);
+appendToMainChat(username, text);
 
-    messageInputEl.value = "";
+lastLocalSent = {
+  roomId: currentRoomId,
+  username,
+  text,
+  ts: Date.now()
+};
+
+messageInputEl.value = "";
 
     try {
       window.localStorage.setItem("meqGasketChatUsername", username);
@@ -224,6 +301,67 @@
       appendToMainChat("System", "Error sending to gasket power room: " + err.message);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // PROGRAMMATIC POST TO SYSTEM ROOM (for NCZ chain / system events)
+  // ---------------------------------------------------------------------------
+ // SINGLE version only – the one that uses SYSTEM_SEGMENT_KEY / systemRoomId
+// SINGLE version only – the one that uses SYSTEM_SEGMENT_KEY / systemRoomId
+async function postSystemRoomMessage(text, username) {
+  const uname = (username || "System").toString();
+  const t     = (text || "").toString().trim();
+  if (!t) return;
+
+  // ✅ map to NCZ_SYSTEM, not a gasket power
+  await ensureSystemRoomMapping();
+
+  if (!systemRoomId) {
+    console.warn("No active system room; system message not sent.");
+    return;
+  }
+
+  // Show in main chat immediately
+  appendToMainChat(uname, t);
+
+  try {
+    const res = await fetch(ROOM_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action:   "post_message",
+        room_id:  systemRoomId,  // ✅ system room, NOT currentRoomId
+        username: uname,
+        text:     t
+      })
+    });
+
+    if (!res.ok) {
+      console.error("system post_message HTTP error", res.status);
+      appendToMainChat("System", "Failed to broadcast system event (" + res.status + ").");
+      return;
+    }
+
+    const data = await res.json();
+    if (typeof data.next_index === "number") {
+      systemLastPollIndex = data.next_index;
+    } else if (typeof data.index === "number") {
+      systemLastPollIndex = data.index + 1;
+    }
+  } catch (err) {
+    console.error("system post_message exception", err);
+    appendToMainChat("System", "Error broadcasting system event: " + err.message);
+  }
+}
+
+// Global bridge used by the watermark panel
+window.MeqSystemChat = {
+  postMessage: function (text, username) {
+    return postSystemRoomMessage(text, username);
+  }
+};
+
+
+
 
   // ---------------------------------------------------------------------------
   // MANUAL HISTORY LOAD
@@ -352,16 +490,28 @@
         return;
       }
 
-      const data = await res.json();
-      const msgs = Array.isArray(data.messages) ? data.messages : [];
+const data = await res.json();
+const msgs = Array.isArray(data.messages) ? data.messages : [];
 
-      if (msgs.length > 0) {
-        msgs.forEach(function (m) {
-          const u = (m.username || "Anon").toString();
-          const t = (m.text || "").toString();
-          appendToMainChat(u, t);
-        });
-      }
+if (msgs.length > 0) {
+  msgs.forEach(function (m) {
+    const u = (m.username || "Anon").toString();
+    const t = (m.text || "").toString();
+
+    // 🔁 skip our own most recent message for ~10 seconds
+    if (
+      lastLocalSent &&
+      lastLocalSent.roomId === currentRoomId &&
+      lastLocalSent.username === u &&
+      lastLocalSent.text === t &&
+      Date.now() - lastLocalSent.ts < 10000
+    ) {
+      return;
+    }
+
+    appendToMainChat(u, t);
+  });
+}
 
       if (typeof data.next_index === "number") {
         lastPollIndex = data.next_index;
@@ -378,6 +528,65 @@
   function scheduleNextPoll() {
     pollTimerId = setTimeout(pollRoomMessages, 30000);
   }
+
+  // ---------------------------------------------------------------------------
+  // POLLING: SYSTEM ROOM MESSAGES
+  // ---------------------------------------------------------------------------
+  async function pollSystemMessages() {
+    systemPollTimerId = null;
+
+    await ensureSystemRoomMapping();
+
+    if (!systemRoomId) {
+      scheduleSystemPoll();
+      return;
+    }
+
+    try {
+      const res = await fetch(ROOM_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action:     "poll_messages",
+          room_id:    systemRoomId,
+          from_index: systemLastPollIndex
+        })
+      });
+
+      if (!res.ok) {
+        console.error("system poll_messages HTTP error", res.status);
+        scheduleSystemPoll();
+        return;
+      }
+
+      const data = await res.json();
+      const msgs = Array.isArray(data.messages) ? data.messages : [];
+
+      if (msgs.length > 0) {
+        msgs.forEach(function (m) {
+          const u = (m.username || "System").toString();
+          const t = (m.text || "").toString();
+          appendToMainChat(u, t);
+        });
+      }
+
+      if (typeof data.next_index === "number") {
+        systemLastPollIndex = data.next_index;
+      } else {
+        systemLastPollIndex += msgs.length;
+      }
+    } catch (err) {
+      console.error("system poll_messages exception", err);
+    }
+
+    scheduleSystemPoll();
+  }
+
+  function scheduleSystemPoll() {
+    systemPollTimerId = setTimeout(pollSystemMessages, 30000);
+  }
+
+
 
   // ---------------------------------------------------------------------------
   // UI: ADD GASKET POWER ROOM BLOCK INSIDE #chatInfoPanel
@@ -531,6 +740,14 @@
       }
     });
 
+    // Start system room polling in parallel
+    ensureSystemRoomMapping().then(function () {
+      if (!systemPollTimerId) {
+        scheduleSystemPoll();
+      }
+    });
+
+
     let lastLabel = getGasketHeaderLabel();
     setInterval(() => {
       const lbl = getGasketHeaderLabel();
@@ -549,10 +766,22 @@
     initWhenReady();
   }
 
+  
+
+
   window.MeqSegmentChat = {
     getCurrentRoomId: function () { return currentRoomId; },
     getGasketPower:   getGasketPower,
     getGasketKey:     getGasketAddressKey,
     forceRemap:       ensureRoomMapping
+    // you can keep any previous helpers here if you already added them
+  };
+
+  // New: global access to the system chat room for NCZ / internal events
+  window.MeqSystemChat = {
+    postMessage: function (text, username) {
+      return postSystemRoomMessage(text, username);
+    }
   };
 })();
+
