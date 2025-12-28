@@ -1202,9 +1202,9 @@ async function callPhpProxy(provider, model, messages) {
         <div style="font-size:11px; color:#0ff;">
           <p><img src="ncz.png"></p>
           <p>MEQUA News:</p>
-          <p>Gemini 2.0 Flash model is active for use.</p>
+          <p>Gemini 3 Flash Preview model is active for use. Other models are rate limited or not working as of 12/28/25. Cashapp me some api funds and I can enable more models :P lol</p>
 <p>The /auto command is available for use via your own API key! enjoy... :)<br />Just type /auto followed by a base prompt.</p>
-<p>Use /api followed by a valid Gemini Flash 2.0 API key and you can use your own api key with no rate limits or without sharing mine.</p>
+<p>Use /api followed by a valid Gemini API key and you can use your own api key with no rate limits or without sharing mine.</p>
         </div>
       </div>
     `;
@@ -1866,4 +1866,5 @@ async function callPhpProxy(provider, model, messages) {
     }
   };
 })();
+
 
