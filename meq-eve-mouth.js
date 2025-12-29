@@ -139,20 +139,29 @@ function normalizeSpeechText(text) {
   let out = text;
 
   // **bold**
-  const boldRe =
-    /(^|[\s([{<"'`])\*\*(?=\S)([\s\S]*?\S)\*\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
-  out = out.replace(boldRe, "$1$2");
+  out = out.replace(/(^|[\s([{<"'`])\*\*(?=\S)([\s\S]*?\S)\*\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g, "$1$2");
 
   // *italic*
-  const italicRe =
-    /(^|[\s([{<"'`])\*(?=\S)([^*\n]*?\S)\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g;
-  out = out.replace(italicRe, "$1$2");
+  out = out.replace(/(^|[\s([{<"'`])\*(?=\S)([^*\n]*?\S)\*(?=(?:[\s\]),.?!:;"'`>)}]|$))/g, "$1$2");
 
-  // LAST PASS: remove asterisk bullets at the start of a line:
-  // "* item" or "   * item"  -> "item"
-  // only if the * is followed by whitespace
+  // remove "* item" bullets
   out = out.replace(/^[ \t]*\*[ \t]+/gm, "");
 
+  // --- NEW: backticks ---
+  out = out.replace(/```[\s\S]*?```/g, " ");
+  out = out.replace(/`+/g, "");
+
+  // headings / hr / runs
+  out = out.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  out = out.replace(/^\s{0,3}(\*{3,}|-{3,}|_{3,})\s*$/gm, "");
+  out = out.replace(/([#*_])\1{1,}/g, " ");
+  // Make line breaks create a noticeable pause (breath)
+  // If the line already ended with punctuation, just add an ellipsis pause.
+  out = out.replace(/([.!?])\s*\r?\n+/g, "$1 … ");
+  // Otherwise, end the line with a period + ellipsis
+  out = out.replace(/\r?\n+/g, ". … ");
+
+  out = out.replace(/\s+/g, " ").trim();
   return out;
 }
 
