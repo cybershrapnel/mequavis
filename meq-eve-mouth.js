@@ -160,7 +160,7 @@ function normalizeSpeechText(text) {
   out = out.replace(/([.!?])\s*\r?\n+/g, "$1 … ");
   // Otherwise, end the line with a period + ellipsis
   out = out.replace(/\r?\n+/g, ". … ");
-
+  out = out.replace(/#{2,}/g, ""); //remove multiple hashtags
   out = out.replace(/\s+/g, " ").trim();
   return out;
 }
